@@ -1,0 +1,9 @@
+node_modules/
+.env
+.env.*
+!.env.example
+.DS_Store
+*.log
+
+# Local Pi auto-discovery wiring; package.json declares the extension entrypoint.
+.pi/
