@@ -1,9 +1,9 @@
 import { complete } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { spawn, type ChildProcess } from "node:child_process";
-import { promises as fs } from "node:fs";
-import { tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, promises as fs } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { dirname, delimiter, join } from "node:path";
 import { Readable } from "node:stream";
 
 const EXTENSION_NAME = "pi-anime-monologue";
@@ -41,7 +41,52 @@ interface GistQueueItem {
 	generation: number;
 }
 
+type FileConfig = Partial<{
+	enabled: boolean;
+	elevenLabsApiKey: string;
+	elevenLabsVoiceId: string;
+	elevenLabsModelId: string;
+	elevenLabsOutputFormat: string;
+	languageCode: string;
+	voiceSpeed: number;
+	player: string;
+	streamAudio: boolean;
+	showGist: boolean;
+	dedupe: boolean;
+	gistUseLlm: boolean;
+	gistProvider: string;
+	gistModel: string;
+	gistMaxInputChars: number;
+	gistTargetWords: number;
+	gistMaxTokens: number;
+	minGistInputChars: number;
+	notify: boolean;
+}>;
 
+const CONFIG_PATH = join(homedir(), ".pi", "agent", "anime-monologue.json");
+
+function readFileConfig(): FileConfig {
+	try {
+		if (!existsSync(CONFIG_PATH)) return {};
+		return JSON.parse(readFileSync(CONFIG_PATH, "utf-8")) as FileConfig;
+	} catch {
+		return {};
+	}
+}
+
+function envOrFile(name: string, fileValue: string | undefined) {
+	return process.env[name] ?? fileValue;
+}
+
+function envOrFileBoolean(name: string, fileValue: boolean | undefined, fallback: boolean) {
+	if (process.env[name] !== undefined) return envBoolean(name, fallback);
+	return fileValue ?? fallback;
+}
+
+function envOrFileNumber(name: string, fileValue: number | undefined, fallback: number) {
+	if (process.env[name] !== undefined) return envNumber(name, fallback);
+	return typeof fileValue === "number" && Number.isFinite(fileValue) ? fileValue : fallback;
+}
 
 function envNumber(name: string, fallback: number) {
 	const value = process.env[name];
@@ -56,10 +101,13 @@ function envBoolean(name: string, fallback: boolean) {
 	return !["0", "false", "off", "no"].includes(value.trim().toLowerCase());
 }
 
-function envLanguageCode() {
-	const value = process.env.ELEVENLABS_LANGUAGE_CODE ?? process.env.ANIME_MONOLOGUE_LANGUAGE_CODE ?? "en";
-	const normalized = value.trim();
+function normalizeLanguageCode(value: string | undefined) {
+	const normalized = (value ?? "en").trim();
 	return ["auto", "clear", "none", ""].includes(normalized.toLowerCase()) ? undefined : normalized;
+}
+
+function envLanguageCode(fileValue?: string) {
+	return normalizeLanguageCode(process.env.ELEVENLABS_LANGUAGE_CODE ?? process.env.ANIME_MONOLOGUE_LANGUAGE_CODE ?? fileValue);
 }
 
 function parseOnOff(value: string | undefined): boolean | undefined {
@@ -71,26 +119,28 @@ function parseOnOff(value: string | undefined): boolean | undefined {
 }
 
 function readConfig(): Config {
+	const file = readFileConfig();
+	const speedFallback = envOrFileNumber("ANIME_MONOLOGUE_SPEED", file.voiceSpeed, 1.15);
 	return {
-		enabled: process.env.ANIME_MONOLOGUE_ENABLED === "1",
-		apiKey: process.env.ELEVENLABS_API_KEY,
-		voiceId: process.env.ELEVENLABS_VOICE_ID,
-		modelId: process.env.ELEVENLABS_MODEL_ID ?? "eleven_multilingual_v2",
-		outputFormat: process.env.ELEVENLABS_OUTPUT_FORMAT ?? "mp3_44100_128",
-		languageCode: envLanguageCode(),
-		voiceSpeed: clamp(envNumber("ELEVENLABS_SPEED", envNumber("ANIME_MONOLOGUE_SPEED", 1.15)), 0.7, 1.2),
-		player: process.env.ANIME_MONOLOGUE_PLAYER,
-		streamAudio: envBoolean("ANIME_MONOLOGUE_STREAM_AUDIO", true),
-		showGist: envBoolean("ANIME_MONOLOGUE_SHOW_GIST", true),
-		dedupe: envBoolean("ANIME_MONOLOGUE_DEDUPE", true),
-		gistUseLlm: envBoolean("ANIME_MONOLOGUE_GIST_LLM", true),
-		gistProvider: process.env.ANIME_MONOLOGUE_GIST_PROVIDER,
-		gistModel: process.env.ANIME_MONOLOGUE_GIST_MODEL,
-		gistMaxInputChars: envNumber("ANIME_MONOLOGUE_GIST_MAX_INPUT_CHARS", 6000),
-		gistTargetWords: envNumber("ANIME_MONOLOGUE_GIST_WORDS", 55),
-		gistMaxTokens: envNumber("ANIME_MONOLOGUE_GIST_MAX_TOKENS", 240),
-		minGistInputChars: envNumber("ANIME_MONOLOGUE_MIN_GIST_INPUT_CHARS", 120),
-		notify: process.env.ANIME_MONOLOGUE_NOTIFY === "1",
+		enabled: envOrFileBoolean("ANIME_MONOLOGUE_ENABLED", file.enabled, false),
+		apiKey: envOrFile("ELEVENLABS_API_KEY", file.elevenLabsApiKey),
+		voiceId: envOrFile("ELEVENLABS_VOICE_ID", file.elevenLabsVoiceId),
+		modelId: envOrFile("ELEVENLABS_MODEL_ID", file.elevenLabsModelId) ?? "eleven_multilingual_v2",
+		outputFormat: envOrFile("ELEVENLABS_OUTPUT_FORMAT", file.elevenLabsOutputFormat) ?? "mp3_44100_128",
+		languageCode: envLanguageCode(file.languageCode),
+		voiceSpeed: clamp(envOrFileNumber("ELEVENLABS_SPEED", file.voiceSpeed, speedFallback), 0.7, 1.2),
+		player: envOrFile("ANIME_MONOLOGUE_PLAYER", file.player),
+		streamAudio: envOrFileBoolean("ANIME_MONOLOGUE_STREAM_AUDIO", file.streamAudio, true),
+		showGist: envOrFileBoolean("ANIME_MONOLOGUE_SHOW_GIST", file.showGist, true),
+		dedupe: envOrFileBoolean("ANIME_MONOLOGUE_DEDUPE", file.dedupe, true),
+		gistUseLlm: envOrFileBoolean("ANIME_MONOLOGUE_GIST_LLM", file.gistUseLlm, true),
+		gistProvider: envOrFile("ANIME_MONOLOGUE_GIST_PROVIDER", file.gistProvider),
+		gistModel: envOrFile("ANIME_MONOLOGUE_GIST_MODEL", file.gistModel),
+		gistMaxInputChars: envOrFileNumber("ANIME_MONOLOGUE_GIST_MAX_INPUT_CHARS", file.gistMaxInputChars, 6000),
+		gistTargetWords: envOrFileNumber("ANIME_MONOLOGUE_GIST_WORDS", file.gistTargetWords, 55),
+		gistMaxTokens: envOrFileNumber("ANIME_MONOLOGUE_GIST_MAX_TOKENS", file.gistMaxTokens, 240),
+		minGistInputChars: envOrFileNumber("ANIME_MONOLOGUE_MIN_GIST_INPUT_CHARS", file.minGistInputChars, 120),
+		notify: envOrFileBoolean("ANIME_MONOLOGUE_NOTIFY", file.notify, false),
 	};
 }
 
@@ -624,7 +674,7 @@ export default function animeMonologue(pi: ExtensionAPI) {
 		}
 		if (speaker.status().hasApiKey && speaker.status().voiceId) return;
 		ctx.ui.notify(
-			"Anime monologue loaded, but keys are missing. Run `/anime-monologue onboard` for guided setup, or set ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID manually.",
+			`Anime monologue loaded, but keys are missing. Run /anime-monologue onboard for guided setup, or set ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID manually. Plugin config: ${CONFIG_PATH}`,
 			"info",
 		);
 	});
@@ -780,8 +830,9 @@ export default function animeMonologue(pi: ExtensionAPI) {
 					ctx.ui.notify(`Anime monologue dedupe ${enabled ? "enabled" : "disabled"}.`, "info");
 					break;
 				}
-			case "onboard":
+				case "onboard":
 				case "setup": {
+					speaker.reloadConfig();
 					const status = speaker.status();
 					const missing: string[] = [];
 					if (!status.hasApiKey) missing.push("ELEVENLABS_API_KEY");
@@ -802,7 +853,7 @@ export default function animeMonologue(pi: ExtensionAPI) {
 
 					const shouldSetup = await ctx.ui.confirm(
 						"Anime Monologue Setup",
-						`Missing: ${missing.join(", ")}. Would you like to configure them now?\n\nValues will be written to .env in the project root.`,
+						`Missing: ${missing.join(", ")}. Would you like to configure them now?\n\nValues will be written to ${CONFIG_PATH}.`,
 					);
 					if (!shouldSetup) break;
 
@@ -837,42 +888,36 @@ export default function animeMonologue(pi: ExtensionAPI) {
 						voiceId = input.trim();
 					}
 
-					// Write to .env file in project root
-					const envPath = join(ctx.cwd, ".env");
 					try {
-						let existing = "";
+						let existing: FileConfig = {};
 						try {
-							existing = await fs.readFile(envPath, "utf-8");
+							existing = JSON.parse(await fs.readFile(CONFIG_PATH, "utf-8")) as FileConfig;
 						} catch {
-							// File doesn't exist yet
+							// File doesn't exist yet, or is invalid. Rewrite with the setup values.
 						}
 
-						const lines = existing.split("\n");
-						const updateVar = (key: string, value: string) => {
-							const idx = lines.findIndex(
-								(l) => l.startsWith(`${key}=`) || l.startsWith(`# ${key}=`),
-							);
-							if (idx !== -1) {
-								lines[idx] = `${key}=${value}`;
-							} else {
-								lines.push(`${key}=${value}`);
-							}
+						const next: FileConfig = {
+							...existing,
+							enabled: existing.enabled ?? true,
+							elevenLabsApiKey: apiKey,
+							elevenLabsVoiceId: voiceId,
 						};
 
-						if (apiKey) updateVar("ELEVENLABS_API_KEY", apiKey);
-						if (voiceId) updateVar("ELEVENLABS_VOICE_ID", voiceId);
-
-						await fs.writeFile(envPath, lines.join("\n") + "\n");
-						ctx.ui.notify(".env updated. Run `/anime-monologue reload` to apply the changes.", "info");
+						mkdirSync(dirname(CONFIG_PATH), { recursive: true });
+						writeFileSync(CONFIG_PATH, `${JSON.stringify(next, null, "\t")}\n`, { mode: 0o600 });
+						await fs.chmod(CONFIG_PATH, 0o600).catch(() => undefined);
+						speaker.reloadConfig();
+						if (speaker.isEnabled()) ctx.ui.setStatus(EXTENSION_NAME, ctx.ui.theme.fg("dim", "anime monologue: on"));
+						ctx.ui.notify(`Anime monologue config updated at ${CONFIG_PATH}.`, "info");
 					} catch (error) {
 						const message = error instanceof Error ? error.message : String(error);
-						ctx.ui.notify(`Failed to write .env: ${message}. Set the variables manually.`, "error");
+						ctx.ui.notify(`Failed to write ${CONFIG_PATH}: ${message}. Set ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID manually.`, "error");
 					}
 					break;
 				}
 				case "reload":
 					speaker.reloadConfig();
-					ctx.ui.notify("Anime monologue config reloaded from environment.", "info");
+					ctx.ui.notify(`Anime monologue config reloaded from environment and ${CONFIG_PATH}.`, "info");
 					break;
 				case "test": {
 					const text = rest.join(" ") || "Nani?! My thoughts are overflowing with dramatic determination!";
@@ -894,7 +939,7 @@ export default function animeMonologue(pi: ExtensionAPI) {
 				case undefined: {
 					const status = speaker.status();
 					ctx.ui.notify(
-						`Anime monologue: ${status.enabled ? "on" : "off"}, ${status.gistUseLlm ? "LLM gist" : "local gist"}, api key: ${status.hasApiKey ? "yes" : "no"}, voice: ${status.voiceId ?? "missing"}, model: ${status.modelId}, language: ${status.languageCode ?? "auto"}, speed: ${status.voiceSpeed}, stream: ${status.streamAudio ? "on" : "off"}, show gist: ${status.showGist ? "on" : "off"}, dedupe: ${status.dedupe ? "on" : "off"}, words: ${status.gistTargetWords}, min chars: ${status.minGistInputChars}, gist model: ${status.gistProvider && status.gistModel ? `${status.gistProvider}/${status.gistModel}` : "current Pi model"}, tts queue: ${status.queue}, gist queue: ${status.gistQueue}`,
+						`Anime monologue: ${status.enabled ? "on" : "off"}, ${status.gistUseLlm ? "LLM gist" : "local gist"}, api key: ${status.hasApiKey ? "yes" : "no"}, voice: ${status.voiceId ?? "missing"}, model: ${status.modelId}, language: ${status.languageCode ?? "auto"}, speed: ${status.voiceSpeed}, stream: ${status.streamAudio ? "on" : "off"}, show gist: ${status.showGist ? "on" : "off"}, dedupe: ${status.dedupe ? "on" : "off"}, words: ${status.gistTargetWords}, min chars: ${status.minGistInputChars}, gist model: ${status.gistProvider && status.gistModel ? `${status.gistProvider}/${status.gistModel}` : "current Pi model"}, tts queue: ${status.queue}, gist queue: ${status.gistQueue}, config: ${CONFIG_PATH}`,
 						"info",
 					);
 					break;

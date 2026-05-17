@@ -1,6 +1,6 @@
 {
   "name": "pi-anime-monologue",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "description": "A Pi extension that reads assistant thinking traces aloud through ElevenLabs TTS.",
   "type": "module",
   "license": "MIT",

@@ -28,14 +28,20 @@ pi -e ./src/index.ts
 
 ## Quick start
 
-1. Set your ElevenLabs credentials:
+1. Run the guided setup inside Pi:
+
+```text
+/anime-monologue onboard
+```
+
+This writes plugin-scoped config to `~/.pi/agent/anime-monologue.json` instead of loading a project `.env` file.
+
+You can also use process environment variables if you prefer:
 
 ```bash
 export ELEVENLABS_API_KEY="..."
 export ELEVENLABS_VOICE_ID="..."
 ```
-
-Or create a `.env` file in the project directory (see [`.env.example`](.env.example)).
 
 2. Load the extension:
 
@@ -75,6 +81,7 @@ Guidance scale:
 | Command | Description |
 | --- | --- |
 | `/anime-monologue status` | Show config and status |
+| `/anime-monologue onboard` | Guided setup; writes `~/.pi/agent/anime-monologue.json` |
 | `/anime-monologue on` | Enable narration |
 | `/anime-monologue off` | Disable narration and clear queued audio |
 | `/anime-monologue pause` | Stop playback and clear queue, stay enabled |
@@ -87,7 +94,7 @@ Guidance scale:
 | `/anime-monologue stream on\|off` | Toggle streaming audio |
 | `/anime-monologue show-gist on\|off` | Toggle gist notification |
 | `/anime-monologue dedupe on\|off` | Toggle duplicate suppression |
-| `/anime-monologue reload` | Reload config from environment |
+| `/anime-monologue reload` | Reload config from environment and `~/.pi/agent/anime-monologue.json` |
 | `/anime-monologue test <text>` | Speak a raw test line |
 | `/anime-monologue think-test <trace>` | Run fake trace through gist pipeline |
 
@@ -98,7 +105,19 @@ Guidance scale:
 | `Ctrl+Alt+M` | Stop playback and clear narration queue |
 | `Ctrl+Alt+N` | Toggle narration on/off |
 
-## Environment variables
+## Configuration
+
+Preferred plugin-scoped config file: `~/.pi/agent/anime-monologue.json`.
+
+```json
+{
+	"enabled": true,
+	"elevenLabsApiKey": "sk_...",
+	"elevenLabsVoiceId": "..."
+}
+```
+
+Environment variables override matching config-file values.
 
 | Variable | Default | Description |
 | --- | --- | --- |
@@ -108,7 +127,7 @@ Guidance scale:
 | `ELEVENLABS_OUTPUT_FORMAT` | `mp3_44100_128` | Output format |
 | `ELEVENLABS_LANGUAGE_CODE` / `ANIME_MONOLOGUE_LANGUAGE_CODE` | `en` | Language code |
 | `ELEVENLABS_SPEED` / `ANIME_MONOLOGUE_SPEED` | `1.15` | Voice speed (`0.7`–`1.2`) |
-| `ANIME_MONOLOGUE_ENABLED` | `1` | Set to `0` to start disabled |
+| `ANIME_MONOLOGUE_ENABLED` | `0` | Set to `1` to start enabled |
 | `ANIME_MONOLOGUE_GIST_LLM` | `1` | Set to `0` for local-only gist trimming |
 | `ANIME_MONOLOGUE_GIST_PROVIDER` | current Pi model | Provider for gist generation |
 | `ANIME_MONOLOGUE_GIST_MODEL` | current Pi model | Model for gist generation |
@@ -127,7 +146,7 @@ Guidance scale:
 pi-anime-monologue/
 ├── src/
 │   └── index.ts          # Extension entry point (default export)
-├── .env.example          # Documented env vars
+├── .env.example          # Optional process env vars
 ├── CHANGELOG.md
 ├── LICENSE
 ├── README.md

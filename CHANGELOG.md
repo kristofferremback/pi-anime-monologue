@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.3.0] – 2026-05-17
+
+### Added
+
+- Plugin-scoped config file `~/.pi/agent/anime-monologue.json` support.
+- `FileConfig` type and `readFileConfig()` helper for reading JSON config.
+- `envOrFile()`, `envOrFileBoolean()`, `envOrFileNumber()` helpers that merge file config with environment variables (env vars override file values).
+- `onboard`/`setup` command now writes config to `~/.pi/agent/anime-monologue.json` instead of `.env`.
+- Config file path shown in status notification and missing-keys warning.
+
+### Changed
+
+- `readConfig()` now merges file config with env vars; env vars take precedence.
+- `reload` command reloads from both environment and config file.
+- `ANIME_MONOLOGUE_ENABLED` default changed to `0` (off by default).
+- Onboard sequence writes config file with `0600` permissions for security.
+
 ## [0.2.0] – 2026-05-17
 
 ### Added
