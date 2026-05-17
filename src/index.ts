@@ -4,10 +4,11 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { promises as fs } from "node:fs";
 import { existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
+import { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 
-const EXTENSION_NAME = "anime-monologue";
+const EXTENSION_NAME = "pi-anime-monologue";
 const EXTENSION_DIR = dirname(fileURLToPath(import.meta.url));
 const protectedEnvKeys = new Set(Object.keys(process.env));
 let loadedEnvPaths: string[] = [];
@@ -21,8 +22,12 @@ interface Config {
 	voiceId?: string;
 	modelId: string;
 	outputFormat: string;
+	languageCode?: string;
 	voiceSpeed: number;
 	player?: string;
+	streamAudio: boolean;
+	showGist: boolean;
+	dedupe: boolean;
 	minChunkChars: number;
 	maxChunkChars: number;
 	narrationMode: NarrationMode;
@@ -32,6 +37,7 @@ interface Config {
 	gistMaxInputChars: number;
 	gistTargetWords: number;
 	gistMaxTokens: number;
+	minGistInputChars: number;
 	notify: boolean;
 }
 
@@ -130,6 +136,20 @@ function envNarrationMode(): NarrationMode {
 	return process.env.ANIME_MONOLOGUE_MODE?.trim().toLowerCase() === "raw" ? "raw" : "gist";
 }
 
+function envLanguageCode() {
+	const value = process.env.ELEVENLABS_LANGUAGE_CODE ?? process.env.ANIME_MONOLOGUE_LANGUAGE_CODE ?? "en";
+	const normalized = value.trim();
+	return ["auto", "clear", "none", ""].includes(normalized.toLowerCase()) ? undefined : normalized;
+}
+
+function parseOnOff(value: string | undefined): boolean | undefined {
+	if (!value) return undefined;
+	const normalized = value.trim().toLowerCase();
+	if (["on", "true", "1", "yes", "enabled"].includes(normalized)) return true;
+	if (["off", "false", "0", "no", "disabled"].includes(normalized)) return false;
+	return undefined;
+}
+
 function readConfig(): Config {
 	loadEnvFiles();
 
@@ -139,8 +159,12 @@ function readConfig(): Config {
 		voiceId: process.env.ELEVENLABS_VOICE_ID,
 		modelId: process.env.ELEVENLABS_MODEL_ID ?? "eleven_multilingual_v2",
 		outputFormat: process.env.ELEVENLABS_OUTPUT_FORMAT ?? "mp3_44100_128",
+		languageCode: envLanguageCode(),
 		voiceSpeed: clamp(envNumber("ELEVENLABS_SPEED", envNumber("ANIME_MONOLOGUE_SPEED", 1.15)), 0.7, 1.2),
 		player: process.env.ANIME_MONOLOGUE_PLAYER,
+		streamAudio: envBoolean("ANIME_MONOLOGUE_STREAM_AUDIO", true),
+		showGist: envBoolean("ANIME_MONOLOGUE_SHOW_GIST", true),
+		dedupe: envBoolean("ANIME_MONOLOGUE_DEDUPE", true),
 		minChunkChars: envNumber("ANIME_MONOLOGUE_MIN_CHARS", 90),
 		maxChunkChars: envNumber("ANIME_MONOLOGUE_MAX_CHARS", 360),
 		narrationMode: envNarrationMode(),
@@ -148,8 +172,9 @@ function readConfig(): Config {
 		gistProvider: process.env.ANIME_MONOLOGUE_GIST_PROVIDER,
 		gistModel: process.env.ANIME_MONOLOGUE_GIST_MODEL,
 		gistMaxInputChars: envNumber("ANIME_MONOLOGUE_GIST_MAX_INPUT_CHARS", 6000),
-		gistTargetWords: envNumber("ANIME_MONOLOGUE_GIST_WORDS", 45),
-		gistMaxTokens: envNumber("ANIME_MONOLOGUE_GIST_MAX_TOKENS", 180),
+		gistTargetWords: envNumber("ANIME_MONOLOGUE_GIST_WORDS", 55),
+		gistMaxTokens: envNumber("ANIME_MONOLOGUE_GIST_MAX_TOKENS", 240),
+		minGistInputChars: envNumber("ANIME_MONOLOGUE_MIN_GIST_INPUT_CHARS", 120),
 		notify: process.env.ANIME_MONOLOGUE_NOTIFY === "1",
 	};
 }
@@ -184,6 +209,10 @@ function normalizeForSpeech(text: string): string {
 		.trim();
 }
 
+function normalizeKey(text: string) {
+	return normalizeForSpeech(text).toLowerCase();
+}
+
 function clipMiddle(text: string, maxChars: number) {
 	if (text.length <= maxChars) return text;
 	const half = Math.max(100, Math.floor(maxChars / 2));
@@ -194,15 +223,30 @@ function firstWords(text: string, count: number) {
 	return text.split(/\s+/).filter(Boolean).slice(0, count).join(" ");
 }
 
+function completeSpokenLine(text: string) {
+	let line = normalizeForSpeech(text)
+		.replace(/^['"“”]+|['"“”]+$/g, "")
+		.replace(/^[-–—\s]+/, "")
+		.trim();
+	if (!line) return "";
+
+	// If the model gave multiple sentences, keep them only if they are complete.
+	const lastPunctuation = Math.max(line.lastIndexOf("."), line.lastIndexOf("!"), line.lastIndexOf("?"));
+	if (lastPunctuation > 20 && lastPunctuation < line.length - 1) {
+		const trailing = line.slice(lastPunctuation + 1).trim();
+		if (trailing.split(/\s+/).filter(Boolean).length > 3) line = line.slice(0, lastPunctuation + 1);
+	}
+
+	return /[.!?]$/.test(line) ? line : `${line}.`;
+}
+
 function localDramaticGist(trace: string, targetWords: number) {
 	const trimmed = firstWords(normalizeForSpeech(trace), Math.max(8, targetWords))
 		.replace(/\bI need to\b/gi, "I must")
 		.replace(/\bwe need to\b/gi, "we must")
 		.replace(/\bmaybe\b/gi, "perhaps")
 		.trim();
-	if (!trimmed) return "";
-	const line = `Can this be enough? Yes — ${trimmed}`;
-	return /[.!?…]$/.test(line) ? line : `${line}…`;
+	return completeSpokenLine(trimmed);
 }
 
 function extractText(content: unknown): string {
@@ -242,12 +286,30 @@ async function fileExists(path: string): Promise<boolean> {
 	}
 }
 
-async function choosePlayer(configured?: string): Promise<{ command: string; args: string[] }> {
+async function commandExists(command: string): Promise<boolean> {
+	if (command.includes("/")) return fileExists(command);
+	for (const dir of (process.env.PATH ?? "").split(delimiter).filter(Boolean)) {
+		if (await fileExists(join(dir, command))) return true;
+	}
+	return false;
+}
+
+async function chooseStreamingPlayer(configured?: string): Promise<{ command: string; args: string[] } | undefined> {
+	// If the user explicitly configured a player, assume it expects file paths and use file fallback.
+	if (configured) return undefined;
+	if (await commandExists("ffplay")) return { command: "ffplay", args: ["-nodisp", "-autoexit", "-loglevel", "quiet", "-i", "pipe:0"] };
+	if (await commandExists("mpv")) return { command: "mpv", args: ["--no-video", "--really-quiet", "-"] };
+	if (await commandExists("mpg123")) return { command: "mpg123", args: ["-q", "-"] };
+	if (await commandExists("play")) return { command: "play", args: ["-q", "-t", "mp3", "-"] };
+	return undefined;
+}
+
+async function chooseFilePlayer(configured?: string): Promise<{ command: string; args: string[] }> {
 	if (configured) return { command: configured, args: [] };
-	if (process.platform === "darwin") return { command: "afplay", args: [] };
-	if (await fileExists("/usr/bin/mpg123")) return { command: "mpg123", args: ["-q"] };
-	if (await fileExists("/usr/bin/ffplay")) return { command: "ffplay", args: ["-nodisp", "-autoexit", "-loglevel", "quiet"] };
-	if (await fileExists("/usr/bin/mpv")) return { command: "mpv", args: ["--no-video", "--really-quiet"] };
+	if (process.platform === "darwin" && (await commandExists("afplay"))) return { command: "afplay", args: [] };
+	if (await commandExists("mpg123")) return { command: "mpg123", args: ["-q"] };
+	if (await commandExists("ffplay")) return { command: "ffplay", args: ["-nodisp", "-autoexit", "-loglevel", "quiet"] };
+	if (await commandExists("mpv")) return { command: "mpv", args: ["--no-video", "--really-quiet"] };
 	return { command: "play", args: ["-q"] };
 }
 
@@ -263,6 +325,8 @@ class AnimeMonologueSpeaker {
 	private summaryAbortController?: AbortController;
 	private playerProcess?: ChildProcess;
 	private stopGeneration = 0;
+	private lastTraceKey?: string;
+	private lastGistKey?: string;
 
 	reloadConfig() {
 		this.config = readConfig();
@@ -280,17 +344,61 @@ class AnimeMonologueSpeaker {
 		this.config.narrationMode = mode;
 	}
 
+	setVoiceSpeed(speed: number) {
+		this.config.voiceSpeed = clamp(speed, 0.7, 1.2);
+		return this.config.voiceSpeed;
+	}
+
+	setLanguageCode(languageCode?: string) {
+		this.config.languageCode = languageCode?.trim() || undefined;
+		return this.config.languageCode;
+	}
+
+	setGistTargetWords(words: number) {
+		this.config.gistTargetWords = Math.round(clamp(words, 8, 120));
+		this.config.gistMaxTokens = Math.max(this.config.gistMaxTokens, this.config.gistTargetWords * 4);
+		return this.config.gistTargetWords;
+	}
+
+	setGistModel(provider?: string, model?: string) {
+		this.config.gistProvider = provider;
+		this.config.gistModel = model;
+	}
+
+	setMinGistInputChars(chars: number) {
+		this.config.minGistInputChars = Math.max(0, Math.round(chars));
+		return this.config.minGistInputChars;
+	}
+
+	setStreamAudio(enabled: boolean) {
+		this.config.streamAudio = enabled;
+	}
+
+	setShowGist(enabled: boolean) {
+		this.config.showGist = enabled;
+	}
+
+	setDedupe(enabled: boolean) {
+		this.config.dedupe = enabled;
+	}
+
 	status() {
 		return {
 			enabled: this.config.enabled,
 			hasApiKey: Boolean(this.config.apiKey),
 			voiceId: this.config.voiceId,
 			modelId: this.config.modelId,
+			languageCode: this.config.languageCode,
 			voiceSpeed: this.config.voiceSpeed,
+			streamAudio: this.config.streamAudio,
+			showGist: this.config.showGist,
+			dedupe: this.config.dedupe,
 			narrationMode: this.config.narrationMode,
 			gistUseLlm: this.config.gistUseLlm,
 			gistProvider: this.config.gistProvider,
 			gistModel: this.config.gistModel,
+			gistTargetWords: this.config.gistTargetWords,
+			minGistInputChars: this.config.minGistInputChars,
 			queue: this.queue.length,
 			gistQueue: this.gistQueue.length,
 			bufferChars: this.buffer.length,
@@ -338,6 +446,8 @@ class AnimeMonologueSpeaker {
 		this.abortController = undefined;
 		this.summaryAbortController?.abort();
 		this.summaryAbortController = undefined;
+		this.lastTraceKey = undefined;
+		this.lastGistKey = undefined;
 		this.playerProcess?.kill("SIGTERM");
 		this.playerProcess = undefined;
 	}
@@ -352,6 +462,12 @@ class AnimeMonologueSpeaker {
 	private enqueueGist(trace: string, ctx?: ExtensionContext) {
 		const trimmed = trace.trim();
 		if (!trimmed) return;
+
+		const traceKey = normalizeKey(trimmed);
+		if (traceKey.length < this.config.minGistInputChars) return;
+		if (this.config.dedupe && traceKey === this.lastTraceKey) return;
+		this.lastTraceKey = traceKey;
+
 		this.gistQueue.push({ trace: trimmed, ctx, generation: this.stopGeneration });
 		void this.drainGists();
 	}
@@ -378,11 +494,23 @@ class AnimeMonologueSpeaker {
 				}
 
 				if (item.generation !== this.stopGeneration || !this.config.enabled) continue;
+
+				const gistKey = normalizeKey(gist);
+				if (!gistKey) continue;
+				if (this.config.dedupe && gistKey === this.lastGistKey) continue;
+				this.lastGistKey = gistKey;
+
+				this.displayGist(gist, item.ctx);
 				this.enqueue(gist, item.ctx);
 			}
 		} finally {
 			this.gistProcessing = false;
 		}
+	}
+
+	private displayGist(gist: string, ctx?: ExtensionContext) {
+		if (!this.config.showGist || !ctx) return;
+		ctx.ui.notify(`🎙 Anime monologue: ${gist}`, "info");
 	}
 
 	private resolveGistModel(ctx: ExtensionContext) {
@@ -415,7 +543,7 @@ class AnimeMonologueSpeaker {
 			const response = await complete(
 				model,
 				{
-					systemPrompt: `You transform hidden AI thinking traces into short spoken summaries. Do not reveal step-by-step reasoning. Compress the whole trace to the practical gist only. Style: brief dramatic anime inner monologue with a self-doubt-to-solution arc: a flicker of uncertainty, then resolve. Do not add new facts, catchphrases, jokes, or ungrounded anime words. Serious, tense, and useful. Maximum ${this.config.gistTargetWords} words. No bullets. No markdown.`,
+					systemPrompt: `You transform hidden AI thinking traces into short spoken summaries. Always write in English. Do not reveal step-by-step reasoning. Compress the whole trace to the practical gist only. Style: brief dramatic anime inner monologue with a self-doubt-to-solution arc: a flicker of uncertainty, then resolve. Avoid repeating a fixed opening phrase. Do not add new facts, catchphrases, jokes, or ungrounded anime words. Serious, tense, and useful. Return one or two complete sentences, maximum ${this.config.gistTargetWords} words. End with final punctuation. No bullets. No markdown.`,
 					messages: [
 						{
 							role: "user" as const,
@@ -438,7 +566,7 @@ class AnimeMonologueSpeaker {
 				},
 			);
 
-			return extractText(response.content) || localDramaticGist(trace, this.config.gistTargetWords);
+			return completeSpokenLine(extractText(response.content)) || localDramaticGist(trace, this.config.gistTargetWords);
 		} finally {
 			if (this.summaryAbortController === controller) this.summaryAbortController = undefined;
 		}
@@ -464,49 +592,56 @@ class AnimeMonologueSpeaker {
 		}
 	}
 
-	private async speak(text: string) {
-		if (!this.config.apiKey || !this.config.voiceId) {
-			if (!this.announcedMissingConfig) {
-				this.announcedMissingConfig = true;
-				throw new Error("set ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID");
+	private async playAudioStream(body: ReadableStream<Uint8Array>, player: { command: string; args: string[] }) {
+		const audioStream = Readable.fromWeb(body as any);
+
+		await new Promise<void>((resolve, reject) => {
+			let settled = false;
+			const child = spawn(player.command, player.args, { stdio: ["pipe", "ignore", "ignore"] });
+			this.playerProcess = child;
+
+			const finish = (error?: Error) => {
+				if (settled) return;
+				settled = true;
+				audioStream.destroy();
+				if (this.playerProcess === child) this.playerProcess = undefined;
+				if (error) reject(error);
+				else resolve();
+			};
+
+			child.on("error", finish);
+			child.on("close", (code, signal) => {
+				if (signal === "SIGTERM" || signal === "SIGKILL") return finish();
+				return code === 0 ? finish() : finish(new Error(`${player.command} exited ${code}`));
+			});
+
+			audioStream.on("error", (error) => {
+				child.kill("SIGTERM");
+				finish(error instanceof Error ? error : new Error(String(error)));
+			});
+
+			if (!child.stdin) {
+				child.kill("SIGTERM");
+				finish(new Error(`${player.command} did not expose stdin`));
+				return;
 			}
-			return;
-		}
 
-		this.abortController = new AbortController();
-		const url = `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(this.config.voiceId)}/stream?output_format=${encodeURIComponent(this.config.outputFormat)}`;
-		const response = await fetch(url, {
-			method: "POST",
-			signal: this.abortController.signal,
-			headers: {
-				"xi-api-key": this.config.apiKey,
-				"accept": "audio/mpeg",
-				"content-type": "application/json",
-			},
-			body: JSON.stringify({
-				text,
-				model_id: this.config.modelId,
-				voice_settings: {
-					stability: 0.35,
-					similarity_boost: 0.75,
-					style: 0.7,
-					use_speaker_boost: true,
-					speed: this.config.voiceSpeed,
-				},
-			}),
+			child.stdin.on("error", (error: NodeJS.ErrnoException) => {
+				if (error.code === "EPIPE") return;
+				child.kill("SIGTERM");
+				finish(error);
+			});
+
+			audioStream.pipe(child.stdin);
 		});
+	}
 
-		if (!response.ok) {
-			const body = await response.text().catch(() => "");
-			throw new Error(`ElevenLabs ${response.status}: ${body.slice(0, 240)}`);
-		}
-
-		const bytes = Buffer.from(await response.arrayBuffer());
+	private async playAudioFile(bytes: Buffer) {
 		const audioPath = join(tmpdir(), `${EXTENSION_NAME}-${Date.now()}-${Math.random().toString(16).slice(2)}.mp3`);
 		await fs.writeFile(audioPath, bytes);
 
 		try {
-			const player = await choosePlayer(this.config.player);
+			const player = await chooseFilePlayer(this.config.player);
 			await new Promise<void>((resolve, reject) => {
 				const child = spawn(player.command, [...player.args, audioPath], { stdio: "ignore" });
 				this.playerProcess = child;
@@ -521,6 +656,57 @@ class AnimeMonologueSpeaker {
 			await fs.rm(audioPath, { force: true });
 		}
 	}
+
+	private async speak(text: string) {
+		if (!this.config.apiKey || !this.config.voiceId) {
+			if (!this.announcedMissingConfig) {
+				this.announcedMissingConfig = true;
+				throw new Error("set ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID");
+			}
+			return;
+		}
+
+		this.abortController = new AbortController();
+		const url = `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(this.config.voiceId)}/stream?output_format=${encodeURIComponent(this.config.outputFormat)}`;
+		const body: Record<string, unknown> = {
+			text: completeSpokenLine(text),
+			model_id: this.config.modelId,
+			voice_settings: {
+				stability: 0.35,
+				similarity_boost: 0.75,
+				style: 0.7,
+				use_speaker_boost: true,
+				speed: this.config.voiceSpeed,
+			},
+		};
+		if (this.config.languageCode) body.language_code = this.config.languageCode;
+
+		const response = await fetch(url, {
+			method: "POST",
+			signal: this.abortController.signal,
+			headers: {
+				"xi-api-key": this.config.apiKey,
+				"accept": "audio/mpeg",
+				"content-type": "application/json",
+			},
+			body: JSON.stringify(body),
+		});
+
+		if (!response.ok) {
+			const body = await response.text().catch(() => "");
+			throw new Error(`ElevenLabs ${response.status}: ${body.slice(0, 240)}`);
+		}
+
+		if (this.config.streamAudio && response.body) {
+			const streamingPlayer = await chooseStreamingPlayer(this.config.player);
+			if (streamingPlayer) {
+				await this.playAudioStream(response.body, streamingPlayer);
+				return;
+			}
+		}
+
+		await this.playAudioFile(Buffer.from(await response.arrayBuffer()));
+	}
 }
 
 export default function animeMonologue(pi: ExtensionAPI) {
@@ -528,6 +714,7 @@ export default function animeMonologue(pi: ExtensionAPI) {
 
 	pi.on("session_start", async (_event, ctx) => {
 		speaker.reloadConfig();
+		ctx.ui.setHiddenThinkingLabel("Thinking hidden — press Ctrl+T to show trace");
 		ctx.ui.setStatus(EXTENSION_NAME, speaker.isEnabled() ? "anime monologue: on" : "anime monologue: off");
 		if (speaker.status().hasApiKey && speaker.status().voiceId) return;
 		ctx.ui.notify(
@@ -564,8 +751,24 @@ export default function animeMonologue(pi: ExtensionAPI) {
 		},
 	});
 
+	pi.registerShortcut("ctrl+alt+n", {
+		description: "Toggle anime monologue narration",
+		handler: async (ctx) => {
+			if (speaker.isEnabled()) {
+				speaker.setEnabled(false);
+				speaker.stop();
+				ctx.ui.setStatus(EXTENSION_NAME, "anime monologue: off");
+				ctx.ui.notify("Anime monologue disabled.", "info");
+				return;
+			}
+			speaker.setEnabled(true);
+			ctx.ui.setStatus(EXTENSION_NAME, "anime monologue: on");
+			ctx.ui.notify("Anime monologue enabled.", "info");
+		},
+	});
+
 	pi.registerCommand("anime-monologue", {
-		description: "Control ElevenLabs narration of thinking traces: on | off | pause | gist | raw | status | reload | test <text>",
+		description: "Control ElevenLabs narration of thinking traces: on | off | pause | gist | raw | speed | words | model | language | status | reload | test <text>",
 		handler: async (args, ctx) => {
 			const [command, ...rest] = args.trim().split(/\s+/);
 			switch (command) {
@@ -604,6 +807,85 @@ export default function animeMonologue(pi: ExtensionAPI) {
 					ctx.ui.notify(`Anime monologue mode: ${mode}.`, "info");
 					break;
 				}
+				case "speed": {
+					const speed = Number(rest[0]);
+					if (!Number.isFinite(speed)) {
+						ctx.ui.notify("Usage: /anime-monologue speed <0.7-1.2>", "error");
+						break;
+					}
+					ctx.ui.notify(`Anime monologue speed set to ${speaker.setVoiceSpeed(speed)}.`, "info");
+					break;
+				}
+				case "words": {
+					const words = Number(rest[0]);
+					if (!Number.isFinite(words)) {
+						ctx.ui.notify("Usage: /anime-monologue words <8-120>", "error");
+						break;
+					}
+					ctx.ui.notify(`Anime monologue gist target set to ${speaker.setGistTargetWords(words)} words.`, "info");
+					break;
+				}
+				case "model": {
+					if (rest[0] === "clear" || rest[0] === "current") {
+						speaker.setGistModel(undefined, undefined);
+						ctx.ui.notify("Anime monologue gist model reset to current Pi model.", "info");
+						break;
+					}
+					const [provider, model] = rest;
+					if (!provider || !model) {
+						ctx.ui.notify("Usage: /anime-monologue model <provider> <model> OR /anime-monologue model current", "error");
+						break;
+					}
+					speaker.setGistModel(provider, model);
+					ctx.ui.notify(`Anime monologue gist model set to ${provider}/${model}.`, "info");
+					break;
+				}
+				case "language": {
+					const language = rest[0] ?? "en";
+					speaker.setLanguageCode(language === "auto" || language === "clear" ? undefined : language);
+					ctx.ui.notify(`Anime monologue ElevenLabs language code set to ${language}.`, "info");
+					break;
+				}
+				case "min":
+				case "min-gist": {
+					const chars = Number(rest[0]);
+					if (!Number.isFinite(chars)) {
+						ctx.ui.notify("Usage: /anime-monologue min <chars>", "error");
+						break;
+					}
+					ctx.ui.notify(`Anime monologue minimum gist input set to ${speaker.setMinGistInputChars(chars)} chars.`, "info");
+					break;
+				}
+				case "stream": {
+					const enabled = parseOnOff(rest[0]);
+					if (enabled === undefined) {
+						ctx.ui.notify("Usage: /anime-monologue stream on|off", "error");
+						break;
+					}
+					speaker.setStreamAudio(enabled);
+					ctx.ui.notify(`Anime monologue streaming audio ${enabled ? "enabled" : "disabled"}.`, "info");
+					break;
+				}
+				case "show-gist": {
+					const enabled = parseOnOff(rest[0]);
+					if (enabled === undefined) {
+						ctx.ui.notify("Usage: /anime-monologue show-gist on|off", "error");
+						break;
+					}
+					speaker.setShowGist(enabled);
+					ctx.ui.notify(`Anime monologue UI gist display ${enabled ? "enabled" : "disabled"}.`, "info");
+					break;
+				}
+				case "dedupe": {
+					const enabled = parseOnOff(rest[0]);
+					if (enabled === undefined) {
+						ctx.ui.notify("Usage: /anime-monologue dedupe on|off", "error");
+						break;
+					}
+					speaker.setDedupe(enabled);
+					ctx.ui.notify(`Anime monologue dedupe ${enabled ? "enabled" : "disabled"}.`, "info");
+					break;
+				}
 				case "reload":
 					speaker.reloadConfig();
 					ctx.ui.notify("Anime monologue config reloaded from environment.", "info");
@@ -628,13 +910,13 @@ export default function animeMonologue(pi: ExtensionAPI) {
 				case undefined: {
 					const status = speaker.status();
 					ctx.ui.notify(
-						`Anime monologue: ${status.enabled ? "on" : "off"}, mode: ${status.narrationMode}${status.gistUseLlm ? " + LLM gist" : " + local gist"}, api key: ${status.hasApiKey ? "yes" : "no"}, voice: ${status.voiceId ?? "missing"}, model: ${status.modelId}, speed: ${status.voiceSpeed}, gist model: ${status.gistProvider && status.gistModel ? `${status.gistProvider}/${status.gistModel}` : "current Pi model"}, tts queue: ${status.queue}, gist queue: ${status.gistQueue}, env files: ${status.envFiles.length ? status.envFiles.join(", ") : "none"}`,
+						`Anime monologue: ${status.enabled ? "on" : "off"}, mode: ${status.narrationMode}${status.gistUseLlm ? " + LLM gist" : " + local gist"}, api key: ${status.hasApiKey ? "yes" : "no"}, voice: ${status.voiceId ?? "missing"}, model: ${status.modelId}, language: ${status.languageCode ?? "auto"}, speed: ${status.voiceSpeed}, stream: ${status.streamAudio ? "on" : "off"}, show gist: ${status.showGist ? "on" : "off"}, dedupe: ${status.dedupe ? "on" : "off"}, words: ${status.gistTargetWords}, min chars: ${status.minGistInputChars}, gist model: ${status.gistProvider && status.gistModel ? `${status.gistProvider}/${status.gistModel}` : "current Pi model"}, tts queue: ${status.queue}, gist queue: ${status.gistQueue}, env files: ${status.envFiles.length ? status.envFiles.join(", ") : "none"}`,
 						"info",
 					);
 					break;
 				}
 				default:
-					ctx.ui.notify("Usage: /anime-monologue on|off|pause|gist|raw|mode gist|mode raw|status|reload|test <text>|think-test <trace>", "error");
+					ctx.ui.notify("Usage: /anime-monologue on|off|pause|gist|raw|mode gist|mode raw|speed <n>|words <n>|model <provider> <model>|language <code>|min <chars>|stream on|off|show-gist on|off|dedupe on|off|status|reload|test <text>|think-test <trace>", "error");
 			}
 		},
 	});
