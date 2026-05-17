@@ -2,6 +2,11 @@
 
 ## [0.2.0] – 2026-05-17
 
+### Added
+
+- `/anime-monologue onboard` (alias `setup`): Interactive guided setup that checks for missing config and writes values to `.env`.
+- Session-start notification now suggests `/anime-monologue onboard` when API key or voice ID is missing.
+
 ### Changed
 
 - Default to **off** for new sessions (`ANIME_MONOLOGUE_ENABLED=1` required to enable).

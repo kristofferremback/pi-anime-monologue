@@ -624,7 +624,7 @@ export default function animeMonologue(pi: ExtensionAPI) {
 		}
 		if (speaker.status().hasApiKey && speaker.status().voiceId) return;
 		ctx.ui.notify(
-			"Anime monologue loaded, but keys are missing. See README for setup: set ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID",
+			"Anime monologue loaded, but keys are missing. Run `/anime-monologue onboard` for guided setup, or set ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID manually.",
 			"info",
 		);
 	});
@@ -678,7 +678,7 @@ export default function animeMonologue(pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("anime-monologue", {
-		description: "Control anime inner-monologue TTS narration: on | off | pause | speed | words | model | language | status | reload | test <text>",
+		description: "Control anime inner-monologue TTS narration: on | off | pause | onboard | speed | words | model | language | status | reload | test <text>",
 		handler: async (args, ctx) => {
 			const [command, ...rest] = args.trim().split(/\s+/);
 			switch (command) {
@@ -780,6 +780,96 @@ export default function animeMonologue(pi: ExtensionAPI) {
 					ctx.ui.notify(`Anime monologue dedupe ${enabled ? "enabled" : "disabled"}.`, "info");
 					break;
 				}
+			case "onboard":
+				case "setup": {
+					const status = speaker.status();
+					const missing: string[] = [];
+					if (!status.hasApiKey) missing.push("ELEVENLABS_API_KEY");
+					if (!status.voiceId) missing.push("ELEVENLABS_VOICE_ID");
+
+					const theme = ctx.ui.theme;
+					ctx.ui.notify(
+						`Anime monologue setup:\n` +
+							`  API key:  ${status.hasApiKey ? theme.fg("success", "✓ set") : theme.fg("error", "✗ missing")}\n` +
+							`  Voice ID: ${status.voiceId ? theme.fg("success", `✓ ${status.voiceId}`) : theme.fg("error", "✗ missing")}`,
+						"info",
+					);
+
+					if (missing.length === 0) {
+						ctx.ui.notify("All required config is set. You're good to go! 🎉", "info");
+						break;
+					}
+
+					const shouldSetup = await ctx.ui.confirm(
+						"Anime Monologue Setup",
+						`Missing: ${missing.join(", ")}. Would you like to configure them now?\n\nValues will be written to .env in the project root.`,
+					);
+					if (!shouldSetup) break;
+
+					// Read current env values to pre-fill suggestions
+					const currentApiKey = process.env.ELEVENLABS_API_KEY;
+					const currentVoiceId = process.env.ELEVENLABS_VOICE_ID;
+
+					let apiKey = status.hasApiKey ? currentApiKey : undefined;
+					let voiceId = status.voiceId ?? currentVoiceId;
+
+					if (!apiKey) {
+						const input = await ctx.ui.input(
+							"Enter your ElevenLabs API key (sk_...)",
+							"sk_",
+						);
+						if (!input) {
+							ctx.ui.notify("Setup cancelled.", "warning");
+							break;
+						}
+						apiKey = input.trim();
+					}
+
+					if (!voiceId) {
+						const input = await ctx.ui.input(
+							"Enter your ElevenLabs voice ID",
+							"",
+						);
+						if (!input) {
+							ctx.ui.notify("Setup cancelled.", "warning");
+							break;
+						}
+						voiceId = input.trim();
+					}
+
+					// Write to .env file in project root
+					const envPath = join(ctx.cwd, ".env");
+					try {
+						let existing = "";
+						try {
+							existing = await fs.readFile(envPath, "utf-8");
+						} catch {
+							// File doesn't exist yet
+						}
+
+						const lines = existing.split("\n");
+						const updateVar = (key: string, value: string) => {
+							const idx = lines.findIndex(
+								(l) => l.startsWith(`${key}=`) || l.startsWith(`# ${key}=`),
+							);
+							if (idx !== -1) {
+								lines[idx] = `${key}=${value}`;
+							} else {
+								lines.push(`${key}=${value}`);
+							}
+						};
+
+						if (apiKey) updateVar("ELEVENLABS_API_KEY", apiKey);
+						if (voiceId) updateVar("ELEVENLABS_VOICE_ID", voiceId);
+
+						await fs.writeFile(envPath, lines.join("\n") + "\n");
+						ctx.ui.notify(".env updated. Run `/anime-monologue reload` to apply the changes.", "info");
+					} catch (error) {
+						const message = error instanceof Error ? error.message : String(error);
+						ctx.ui.notify(`Failed to write .env: ${message}. Set the variables manually.`, "error");
+					}
+					break;
+				}
 				case "reload":
 					speaker.reloadConfig();
 					ctx.ui.notify("Anime monologue config reloaded from environment.", "info");
@@ -810,7 +900,7 @@ export default function animeMonologue(pi: ExtensionAPI) {
 					break;
 				}
 				default:
-					ctx.ui.notify("Usage: /anime-monologue on|off|pause|speed <n>|words <n>|model <provider> <model>|language <code>|min <chars>|stream on|off|show-gist on|off|dedupe on|off|status|reload|test <text>|think-test <trace>", "error");
+					ctx.ui.notify("Usage: /anime-monologue on|off|pause|onboard|speed <n>|words <n>|model <provider> <model>|language <code>|min <chars>|stream on|off|show-gist on|off|dedupe on|off|status|reload|test <text>|think-test <trace>", "error");
 			}
 		},
 	});
