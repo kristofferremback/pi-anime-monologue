@@ -300,6 +300,11 @@ class AnimeMonologueSpeaker {
 		this.config.enabled = enabled;
 	}
 
+	setVoiceId(voiceId: string | undefined) {
+		this.config.voiceId = voiceId?.trim() || undefined;
+		return this.config.voiceId;
+	}
+
 	setVoiceSpeed(speed: number) {
 		this.config.voiceSpeed = clamp(speed, 0.7, 1.2);
 		return this.config.voiceSpeed;
@@ -728,7 +733,7 @@ export default function animeMonologue(pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("anime-monologue", {
-		description: "Control anime inner-monologue TTS narration: on | off | pause | onboard | speed | words | model | language | status | reload | test <text>",
+		description: "Control anime inner-monologue TTS narration: on | off | pause | onboard | speed | voice | words | model | language | status | reload | test <text>",
 		handler: async (args, ctx) => {
 			const [command, ...rest] = args.trim().split(/\s+/);
 			switch (command) {
@@ -782,6 +787,16 @@ export default function animeMonologue(pi: ExtensionAPI) {
 					}
 					speaker.setGistModel(provider, model);
 					ctx.ui.notify(`Anime monologue gist model set to ${provider}/${model}.`, "info");
+					break;
+				}
+				case "voice": {
+					if (!rest[0]) {
+						ctx.ui.notify(`Anime monologue voice ID: ${speaker.status().voiceId ?? "not set"}`, "info");
+						break;
+					}
+					const voiceId = rest.join(" ");
+					speaker.setVoiceId(voiceId);
+					ctx.ui.notify(`Anime monologue voice ID set to ${voiceId}.`, "info");
 					break;
 				}
 				case "language": {
@@ -945,7 +960,7 @@ export default function animeMonologue(pi: ExtensionAPI) {
 					break;
 				}
 				default:
-					ctx.ui.notify("Usage: /anime-monologue on|off|pause|onboard|speed <n>|words <n>|model <provider> <model>|language <code>|min <chars>|stream on|off|show-gist on|off|dedupe on|off|status|reload|test <text>|think-test <trace>", "error");
+					ctx.ui.notify("Usage: /anime-monologue on|off|pause|onboard|speed <n>|voice [id]|words <n>|model <provider> <model>|language <code>|min <chars>|stream on|off|show-gist on|off|dedupe on|off|status|reload|test <text>|think-test <trace>", "error");
 			}
 		},
 	});

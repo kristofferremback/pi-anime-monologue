@@ -9,6 +9,7 @@
 - `envOrFile()`, `envOrFileBoolean()`, `envOrFileNumber()` helpers that merge file config with environment variables (env vars override file values).
 - `onboard`/`setup` command now writes config to `~/.pi/agent/anime-monologue.json` instead of `.env`.
 - Config file path shown in status notification and missing-keys warning.
+- `/anime-monologue voice [id]` command to set or query the voice ID at runtime.
 
 ### Changed
 

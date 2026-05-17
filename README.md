@@ -86,6 +86,7 @@ Guidance scale:
 | `/anime-monologue off` | Disable narration and clear queued audio |
 | `/anime-monologue pause` | Stop playback and clear queue, stay enabled |
 | `/anime-monologue speed <0.7-1.2>` | Set voice speed |
+| `/anime-monologue voice [id]` | Set voice ID (show current if omitted) |
 | `/anime-monologue words <8-120>` | Set gist target length |
 | `/anime-monologue model <provider> <model>` | Set gist LLM provider/model |
 | `/anime-monologue model current` | Use current Pi model for gists |
