@@ -22,6 +22,10 @@ ELEVENLABS_VOICE_ID=...
 
 Real environment variables win over values in `.env`. The extension now checks several likely locations: the current working directory, the extension directory, and parent directories around the extension file.
 
+### Suggested ElevenLabs voice
+
+This plugin was tuned with an anime protagonist inner-monologue Voice Design. You can recreate it from this [ElevenLabs voice design link](https://elevenlabs.io/app/voice-lab?action=create&creationType=voiceDesign&prompt=A+young+male+anime+protagonist%27s+inner+monologue:+sincere,+vulnerable,+and+quietly+intense.+He+starts+with+self-doubt+and+low+confidence,+then+gradually+finds+courage,+positivity,+and+resolve.+Emotional+and+cinematic,+with+slight+breathiness,+natural+dramatic+pauses,+and+controlled+urgency.+Anime-inspired+but+believable;+no+shouting,+parody,+comedy,+or+catchphrases.&previewText=Your+weapons+are+but+toothpicks+to+me.+[laughs]+Surrender+now+and+I+may+grant+you+a+swift+end.+I%27ve+toppled+kingdoms+and+devoured+armies.+What+hope+do+you+have+against+me?&seed=28634&loudness=0.5&guidanceScale=5), then copy its voice ID into `ELEVENLABS_VOICE_ID`.
+
 Or install/copy this as a Pi package/extension. The package declares:
 
 ```json
