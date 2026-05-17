@@ -10,6 +10,7 @@
 - `onboard`/`setup` command now writes config to `~/.pi/agent/anime-monologue.json` instead of `.env`.
 - Config file path shown in status notification and missing-keys warning.
 - `/anime-monologue voice [id]` command to set or query the voice ID at runtime.
+- `writeConfig()` method on `AnimeMonologueSpeaker` that persists the full runtime config back to `~/.pi/agent/anime-monologue.json`.
 
 ### Changed
 
@@ -17,6 +18,7 @@
 - `reload` command reloads from both environment and config file.
 - `ANIME_MONOLOGUE_ENABLED` default changed to `0` (off by default).
 - Onboard sequence writes config file with `0600` permissions for security.
+- `/anime-monologue voice` now persists the voice ID to the config file via `writeConfig()`, so it survives restarts and reloads.
 
 ## [0.2.0] – 2026-05-17
 
