@@ -2,17 +2,11 @@ import { complete } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { spawn, type ChildProcess } from "node:child_process";
 import { promises as fs } from "node:fs";
-import { existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, dirname, join } from "node:path";
+import { delimiter, join } from "node:path";
 import { Readable } from "node:stream";
-import { fileURLToPath } from "node:url";
 
 const EXTENSION_NAME = "pi-anime-monologue";
-const EXTENSION_DIR = dirname(fileURLToPath(import.meta.url));
-const protectedEnvKeys = new Set(Object.keys(process.env));
-let loadedEnvPaths: string[] = [];
-let loadedEnvKeys = new Set<string>();
 
 interface Config {
 	enabled: boolean;
@@ -47,72 +41,7 @@ interface GistQueueItem {
 	generation: number;
 }
 
-function candidateEnvPaths() {
-	return Array.from(
-		new Set([
-			join(process.cwd(), ".env"),
-			join(EXTENSION_DIR, ".env"),
-			join(EXTENSION_DIR, "..", ".env"),
-			join(EXTENSION_DIR, "..", "..", ".env"),
-		]),
-	);
-}
 
-function parseEnvLine(rawLine: string): [string, string] | undefined {
-	let line = rawLine.trim();
-	if (!line || line.startsWith("#")) return undefined;
-	if (line.startsWith("export ")) line = line.slice("export ".length).trim();
-
-	const equals = line.indexOf("=");
-	if (equals === -1) return undefined;
-
-	const key = line.slice(0, equals).trim();
-	if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) return undefined;
-
-	let value = line.slice(equals + 1).trim();
-	const quote = value[0];
-	if ((quote === '"' || quote === "'") && value.endsWith(quote)) {
-		value = value.slice(1, -1);
-	} else if (quote !== '"' && quote !== "'") {
-		value = value.replace(/\s+#.*$/, "");
-	}
-	if (quote === '"') {
-		value = value.replace(/\\n/g, "\n").replace(/\\r/g, "\r").replace(/\\t/g, "\t").replace(/\\"/g, '"').replace(/\\\\/g, "\\");
-	}
-
-	return [key, value];
-}
-
-function loadEnvFiles() {
-	loadedEnvPaths = [];
-	const nextEnv = new Map<string, string>();
-
-	for (const path of candidateEnvPaths()) {
-		if (!existsSync(path)) continue;
-		loadedEnvPaths.push(path);
-
-		const content = readFileSync(path, "utf8");
-		for (const rawLine of content.split(/\r?\n/)) {
-			const parsed = parseEnvLine(rawLine);
-			if (!parsed) continue;
-
-			const [key, value] = parsed;
-			if (!nextEnv.has(key)) nextEnv.set(key, value);
-		}
-	}
-
-	for (const key of loadedEnvKeys) {
-		if (!nextEnv.has(key) && !protectedEnvKeys.has(key)) delete process.env[key];
-	}
-
-	const nextLoadedKeys = new Set<string>();
-	for (const [key, value] of nextEnv) {
-		if (protectedEnvKeys.has(key)) continue;
-		process.env[key] = value;
-		nextLoadedKeys.add(key);
-	}
-	loadedEnvKeys = nextLoadedKeys;
-}
 
 function envNumber(name: string, fallback: number) {
 	const value = process.env[name];
@@ -142,10 +71,8 @@ function parseOnOff(value: string | undefined): boolean | undefined {
 }
 
 function readConfig(): Config {
-	loadEnvFiles();
-
 	return {
-		enabled: process.env.ANIME_MONOLOGUE_ENABLED !== "0",
+		enabled: process.env.ANIME_MONOLOGUE_ENABLED === "1",
 		apiKey: process.env.ELEVENLABS_API_KEY,
 		voiceId: process.env.ELEVENLABS_VOICE_ID,
 		modelId: process.env.ELEVENLABS_MODEL_ID ?? "eleven_multilingual_v2",
@@ -380,7 +307,6 @@ class AnimeMonologueSpeaker {
 			queue: this.queue.length,
 			gistQueue: this.gistQueue.length,
 			bufferChars: this.buffer.length,
-			envFiles: loadedEnvPaths,
 		};
 	}
 
@@ -675,13 +601,30 @@ class AnimeMonologueSpeaker {
 export default function animeMonologue(pi: ExtensionAPI) {
 	const speaker = new AnimeMonologueSpeaker();
 
-	pi.on("session_start", async (_event, ctx) => {
+	pi.on("session_start", async (event, ctx) => {
 		speaker.reloadConfig();
+
+		// Restore persisted enabled state when resuming a session
+		if (event.reason === "resume") {
+			for (const entry of ctx.sessionManager.getEntries().reverse()) {
+				if (entry.type === "custom" && entry.customType === `${EXTENSION_NAME}-state`) {
+					const data = entry.data as { enabled: boolean } | undefined;
+					if (data && typeof data.enabled === "boolean") {
+						speaker.setEnabled(data.enabled);
+					}
+					break;
+				}
+			}
+		}
+
 		ctx.ui.setHiddenThinkingLabel("Thinking hidden — press Ctrl+T to show trace");
-		ctx.ui.setStatus(EXTENSION_NAME, speaker.isEnabled() ? "anime monologue: on" : "anime monologue: off");
+		const theme = ctx.ui.theme;
+		if (speaker.isEnabled()) {
+			ctx.ui.setStatus(EXTENSION_NAME, theme.fg("dim", "anime monologue: on"));
+		}
 		if (speaker.status().hasApiKey && speaker.status().voiceId) return;
 		ctx.ui.notify(
-			`Anime monologue loaded, but keys are missing. Looked for .env at: ${candidateEnvPaths().join(", ")}`,
+			"Anime monologue loaded, but keys are missing. See README for setup: set ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID",
 			"info",
 		);
 	});
@@ -703,6 +646,7 @@ export default function animeMonologue(pi: ExtensionAPI) {
 	});
 
 	pi.on("session_shutdown", () => {
+		pi.appendEntry(`${EXTENSION_NAME}-state`, { enabled: speaker.isEnabled() });
 		speaker.stop();
 	});
 
@@ -717,15 +661,18 @@ export default function animeMonologue(pi: ExtensionAPI) {
 	pi.registerShortcut("ctrl+alt+n", {
 		description: "Toggle anime monologue narration",
 		handler: async (ctx) => {
+			const theme = ctx.ui.theme;
 			if (speaker.isEnabled()) {
 				speaker.setEnabled(false);
 				speaker.stop();
-				ctx.ui.setStatus(EXTENSION_NAME, "anime monologue: off");
+				ctx.ui.setStatus(EXTENSION_NAME, undefined);
+				pi.appendEntry(`${EXTENSION_NAME}-state`, { enabled: false });
 				ctx.ui.notify("Anime monologue disabled.", "info");
 				return;
 			}
 			speaker.setEnabled(true);
-			ctx.ui.setStatus(EXTENSION_NAME, "anime monologue: on");
+			ctx.ui.setStatus(EXTENSION_NAME, theme.fg("dim", "anime monologue: on"));
+			pi.appendEntry(`${EXTENSION_NAME}-state`, { enabled: true });
 			ctx.ui.notify("Anime monologue enabled.", "info");
 		},
 	});
@@ -737,13 +684,15 @@ export default function animeMonologue(pi: ExtensionAPI) {
 			switch (command) {
 				case "on":
 					speaker.setEnabled(true);
-					ctx.ui.setStatus(EXTENSION_NAME, "anime monologue: on");
+					ctx.ui.setStatus(EXTENSION_NAME, ctx.ui.theme.fg("dim", "anime monologue: on"));
+					pi.appendEntry(`${EXTENSION_NAME}-state`, { enabled: true });
 					ctx.ui.notify("Anime monologue thinking narration enabled.", "info");
 					break;
 				case "off":
 					speaker.setEnabled(false);
 					speaker.stop();
-					ctx.ui.setStatus(EXTENSION_NAME, "anime monologue: off");
+					ctx.ui.setStatus(EXTENSION_NAME, undefined);
+					pi.appendEntry(`${EXTENSION_NAME}-state`, { enabled: false });
 					ctx.ui.notify("Anime monologue thinking narration disabled.", "info");
 					break;
 				case "pause":
@@ -855,7 +804,7 @@ export default function animeMonologue(pi: ExtensionAPI) {
 				case undefined: {
 					const status = speaker.status();
 					ctx.ui.notify(
-						`Anime monologue: ${status.enabled ? "on" : "off"}, ${status.gistUseLlm ? "LLM gist" : "local gist"}, api key: ${status.hasApiKey ? "yes" : "no"}, voice: ${status.voiceId ?? "missing"}, model: ${status.modelId}, language: ${status.languageCode ?? "auto"}, speed: ${status.voiceSpeed}, stream: ${status.streamAudio ? "on" : "off"}, show gist: ${status.showGist ? "on" : "off"}, dedupe: ${status.dedupe ? "on" : "off"}, words: ${status.gistTargetWords}, min chars: ${status.minGistInputChars}, gist model: ${status.gistProvider && status.gistModel ? `${status.gistProvider}/${status.gistModel}` : "current Pi model"}, tts queue: ${status.queue}, gist queue: ${status.gistQueue}, env files: ${status.envFiles.length ? status.envFiles.join(", ") : "none"}`,
+						`Anime monologue: ${status.enabled ? "on" : "off"}, ${status.gistUseLlm ? "LLM gist" : "local gist"}, api key: ${status.hasApiKey ? "yes" : "no"}, voice: ${status.voiceId ?? "missing"}, model: ${status.modelId}, language: ${status.languageCode ?? "auto"}, speed: ${status.voiceSpeed}, stream: ${status.streamAudio ? "on" : "off"}, show gist: ${status.showGist ? "on" : "off"}, dedupe: ${status.dedupe ? "on" : "off"}, words: ${status.gistTargetWords}, min chars: ${status.minGistInputChars}, gist model: ${status.gistProvider && status.gistModel ? `${status.gistProvider}/${status.gistModel}` : "current Pi model"}, tts queue: ${status.queue}, gist queue: ${status.gistQueue}`,
 						"info",
 					);
 					break;

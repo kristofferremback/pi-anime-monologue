@@ -3,18 +3,39 @@
   "version": "0.1.0",
   "description": "A Pi extension that reads assistant thinking traces aloud through ElevenLabs TTS.",
   "type": "module",
+  "license": "MIT",
+  "keywords": ["pi-package", "pi-extension", "tts", "elevenlabs", "anime"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kristofferremback/pi-anime-monologue.git"
+  },
+  "bugs": {
+    "url": "https://github.com/kristofferremback/pi-anime-monologue/issues"
+  },
+  "homepage": "https://github.com/kristofferremback/pi-anime-monologue#readme",
   "pi": {
     "extensions": ["./src/index.ts"]
   },
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "dev": "pi --no-extensions --no-skills --no-prompt-templates --no-themes --no-context-files -e ./src/index.ts"
   },
-  "dependencies": {
-    "@earendil-works/pi-ai": "latest"
+  "files": ["src", "README.md", "LICENSE", "CHANGELOG.md"],
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
   },
   "devDependencies": {
+    "@earendil-works/pi-ai": "latest",
     "@earendil-works/pi-coding-agent": "latest",
+    "@earendil-works/pi-tui": "latest",
+    "typebox": "latest",
     "@types/node": "latest",
     "typescript": "latest"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }
