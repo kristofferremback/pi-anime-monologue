@@ -55,25 +55,25 @@ Or if installed as a package, it auto-loads.
 
 ## Suggested ElevenLabs voice
 
-This plugin was tuned with an anime protagonist inner-monologue Voice Design. You can recreate it from this [ElevenLabs voice design link](https://elevenlabs.io/app/voice-lab?action=create&creationType=voiceDesign&prompt=A+young+male+anime+protagonist%27s+inner+monologue:+sincere,+vulnerable,+and+quietly+intense.+He+starts+with+self-doubt+and+low+confidence,+then+gradually+finds+courage,+positivity,+and+resolve.+Emotional+and+cinematic,+with+slight+breathiness,+natural+dramatic+pauses,+and+controlled+urgency.+Anime-inspired+but+believable;+no+shouting,+parody,+comedy,+or+catchphrases.&previewText=Your+weapons+are+but+toothpicks+to+me.+[laughs]+Surrender+now+and+I+may+grant+you+a+swift+end.+I%27ve+toppled+kingdoms+and+devoured+armies.+What+hope+do+you+have+against+me?&seed=28634&loudness=0.5&guidanceScale=5), then copy its voice ID into `ELEVENLABS_VOICE_ID`.
+This plugin was tuned with an anime protagonist inner-monologue Voice Design. You can recreate it from this [ElevenLabs voice design link](https://elevenlabs.io/app/voice-lab?action=create&creationType=voiceDesign&prompt=An+American+anime+dub+voice+actor+doing+a+breathy+inner+monologue+%E2%80%94+bright%2C+forward%2C+nasal+resonance+with+natural+twang.+Not+soft+or+round.+Not+%22boyish%22+in+a+sweet+sense.+Think+the+edgy%2C+crackling+energy+of+Ichigo%2C+Naruto%2C+Eren%2C+or+Deku+in+a+vulnerable+but+determined+moment.+Heavy+nasal+brightness%2C+forward-placed+vowels+%28hard+%27r%27+sounds%2C+flat+%27a%27%29.+Starts+with+a+raspy%2C+trembling+whisper+%5Bbreath%5D+%5Bexhale%5D%2C+then+climbs+into+a+strained%2C+almost+heroic+crackle.+Breathy+and+intense+but+grounded+in+American+vocal+fry+and+twang.+No+British+RP%2C+no+Aussie+lift%2C+no+rounded+vowels.+Melodramatic+but+sincere.&previewText=%5Bbreath%5D+I+can%27t...+I+can%27t+stop+now.+Not+when+I%27ve+come+this+far.+%5Bbreath%5D+My+heart+feels+like+it%27s+gonna+burst+but+%5Bexhale%5D+that%27s+fine...+that+just+means+I%27m+alive.+I+gotta+push+through.+I+gotta+see+what%27s+waiting+for+me+on+the+other+side%21&seed=59013&loudness=0.7&guidanceScale=3), then copy its voice ID into `ELEVENLABS_VOICE_ID`.
 
 Readable settings from that link:
 
 ```text
 Voice prompt:
-A young male anime protagonist's inner monologue: sincere, vulnerable, and quietly intense. He starts with self-doubt and low confidence, then gradually finds courage, positivity, and resolve. Emotional and cinematic, with slight breathiness, natural dramatic pauses, and controlled urgency. Anime-inspired but believable; no shouting, parody, comedy, or catchphrases.
+An American anime dub voice actor doing a breathy inner monologue — bright, forward, nasal resonance with natural twang. Not soft or round. Not "boyish" in a sweet sense. Think the edgy, crackling energy of Ichigo, Naruto, Eren, or Deku in a vulnerable but determined moment. Heavy nasal brightness, forward-placed vowels (hard 'r' sounds, flat 'a'). Starts with a raspy, trembling whisper [breath] [exhale], then climbs into a strained, almost heroic crackle. Breathy and intense but grounded in American vocal fry and twang. No British RP, no Aussie lift, no rounded vowels. Melodramatic but sincere.
 
 Preview text:
-Your weapons are but toothpicks to me. [laughs] Surrender now and I may grant you a swift end. I've toppled kingdoms and devoured armies. What hope do you have against me?
+[breath] I can't... I can't stop now. Not when I've come this far. [breath] My heart feels like it's gonna burst but [exhale] that's fine... that just means I'm alive. I gotta push through. I gotta see what's waiting for me on the other side!
 
 Seed:
-28634
+59013
 
 Loudness:
-0.5
+0.65
 
 Guidance scale:
-5
+3
 ```
 
 ## Commands
@@ -85,7 +85,7 @@ Guidance scale:
 | `/anime-monologue on` | Enable narration |
 | `/anime-monologue off` | Disable narration and clear queued audio |
 | `/anime-monologue pause` | Stop playback and clear queue, stay enabled |
-| `/anime-monologue speed <0.7-1.2>` | Set voice speed |
+| `/anime-monologue speed <0.5-1.2>` | Set voice speed |
 | `/anime-monologue voice [id]` | Set voice ID (show current if omitted) |
 | `/anime-monologue words <8-120>` | Set gist target length |
 | `/anime-monologue model <provider> <model>` | Set gist LLM provider/model |
@@ -127,7 +127,7 @@ Environment variables override matching config-file values.
 | `ELEVENLABS_MODEL_ID` | `eleven_multilingual_v2` | ElevenLabs model |
 | `ELEVENLABS_OUTPUT_FORMAT` | `mp3_44100_128` | Output format |
 | `ELEVENLABS_LANGUAGE_CODE` / `ANIME_MONOLOGUE_LANGUAGE_CODE` | `en` | Language code |
-| `ELEVENLABS_SPEED` / `ANIME_MONOLOGUE_SPEED` | `1.15` | Voice speed (`0.7`–`1.2`) |
+| `ELEVENLABS_SPEED` / `ANIME_MONOLOGUE_SPEED` | `1.0` | Voice speed (`0.5`–`1.2`) |
 | `ANIME_MONOLOGUE_ENABLED` | `0` | Set to `1` to start enabled |
 | `ANIME_MONOLOGUE_GIST_LLM` | `1` | Set to `0` for local-only gist trimming |
 | `ANIME_MONOLOGUE_GIST_PROVIDER` | current Pi model | Provider for gist generation |

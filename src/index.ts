@@ -120,7 +120,7 @@ function parseOnOff(value: string | undefined): boolean | undefined {
 
 function readConfig(): Config {
 	const file = readFileConfig();
-	const speedFallback = envOrFileNumber("ANIME_MONOLOGUE_SPEED", file.voiceSpeed, 1.15);
+	const speedFallback = envOrFileNumber("ANIME_MONOLOGUE_SPEED", file.voiceSpeed, 1.0);
 	return {
 		enabled: envOrFileBoolean("ANIME_MONOLOGUE_ENABLED", file.enabled, false),
 		apiKey: envOrFile("ELEVENLABS_API_KEY", file.elevenLabsApiKey),
@@ -128,7 +128,7 @@ function readConfig(): Config {
 		modelId: envOrFile("ELEVENLABS_MODEL_ID", file.elevenLabsModelId) ?? "eleven_multilingual_v2",
 		outputFormat: envOrFile("ELEVENLABS_OUTPUT_FORMAT", file.elevenLabsOutputFormat) ?? "mp3_44100_128",
 		languageCode: envLanguageCode(file.languageCode),
-		voiceSpeed: clamp(envOrFileNumber("ELEVENLABS_SPEED", file.voiceSpeed, speedFallback), 0.7, 1.2),
+		voiceSpeed: clamp(envOrFileNumber("ELEVENLABS_SPEED", file.voiceSpeed, speedFallback), 0.5, 1.2),
 		player: envOrFile("ANIME_MONOLOGUE_PLAYER", file.player),
 		streamAudio: envOrFileBoolean("ANIME_MONOLOGUE_STREAM_AUDIO", file.streamAudio, true),
 		showGist: envOrFileBoolean("ANIME_MONOLOGUE_SHOW_GIST", file.showGist, true),
@@ -171,6 +171,24 @@ function firstWords(text: string, count: number) {
 	return text.split(/\s+/).filter(Boolean).slice(0, count).join(" ");
 }
 
+function sentenceAwareTruncate(text: string, targetWords: number): string {
+	// Split into sentences while keeping the punctuation
+	const sentences = text.match(/[^.!?]*[.!?]+/g) || [text];
+	if (sentences.length <= 1) return firstWords(text, targetWords);
+
+	// Keep adding complete sentences until we'd exceed the target
+	let result = "";
+	let wordCount = 0;
+	for (const sentence of sentences) {
+		const sentenceWords = sentence.split(/\s+/).filter(Boolean).length;
+		if (wordCount + sentenceWords > targetWords && wordCount > 0) break;
+		result += (result ? " " : "") + sentence.trim();
+		wordCount += sentenceWords;
+	}
+
+	return result.trim() || firstWords(text, targetWords);
+}
+
 function stripLeadingGistDecorations(text: string) {
 	return text
 		.trim()
@@ -197,14 +215,27 @@ function completeSpokenLine(text: string) {
 		if (trailing.split(/\s+/).filter(Boolean).length > 3) line = line.slice(0, lastPunctuation + 1);
 	}
 
-	return /[.!?]$/.test(line) ? line : `${line}.`;
+	// Handle trailing non-sentence punctuation gracefully
+	if (/[.!?]$/.test(line)) return line;
+	return line.replace(/[,:;–—\s]+$/g, "") + ".";
 }
 
 function localDramaticGist(trace: string, targetWords: number) {
-	const trimmed = firstWords(normalizeForSpeech(trace), Math.max(8, targetWords))
-		.replace(/\bI need to\b/gi, "I must")
-		.replace(/\bwe need to\b/gi, "we must")
-		.replace(/\bmaybe\b/gi, "perhaps")
+	const trimmed = sentenceAwareTruncate(normalizeForSpeech(trace), Math.max(8, targetWords))
+		.replace(/\bI need to\b/gi, "I gotta")
+		.replace(/\bwe need to\b/gi, "we've gotta")
+		.replace(/\bmaybe\b/gi, "maybe... just maybe")
+		.replace(/\bI think\b/gi, "I know")
+		.replace(/\bperhaps\b/gi, "maybe")
+		.replace(/\bshould\b/gi, "gotta")
+		.replace(/\bcould\b/gi, "can")
+		.replace(/\bwould\b/gi, "will")
+		.replace(/\bhave to\b/gi, "gotta")
+		.replace(/\bthis is\b/gi, "this... this is")
+		.replace(/\bi will\b/gi, "I'm gonna")
+		.replace(/\bi am\b/gi, "I'm")
+		.replace(/\bi have\b/gi, "I've")
+		.replace(/([.!?])/g, "$1")
 		.trim();
 	return completeSpokenLine(trimmed);
 }
@@ -328,49 +359,59 @@ class AnimeMonologueSpeaker {
 
 	setEnabled(enabled: boolean) {
 		this.config.enabled = enabled;
+		this.writeConfig();
 	}
 
 	setVoiceId(voiceId: string | undefined) {
 		this.config.voiceId = voiceId?.trim() || undefined;
+		this.writeConfig();
 		return this.config.voiceId;
 	}
 
 	setVoiceSpeed(speed: number) {
-		this.config.voiceSpeed = clamp(speed, 0.7, 1.2);
+		this.config.voiceSpeed = clamp(speed, 0.5, 1.2);
+		this.writeConfig();
 		return this.config.voiceSpeed;
 	}
 
 	setLanguageCode(languageCode?: string) {
 		this.config.languageCode = languageCode?.trim() || undefined;
+		this.writeConfig();
 		return this.config.languageCode;
 	}
 
 	setGistTargetWords(words: number) {
 		this.config.gistTargetWords = Math.round(clamp(words, 8, 120));
 		this.config.gistMaxTokens = Math.max(this.config.gistMaxTokens, this.config.gistTargetWords * 4);
+		this.writeConfig();
 		return this.config.gistTargetWords;
 	}
 
 	setGistModel(provider?: string, model?: string) {
 		this.config.gistProvider = provider;
 		this.config.gistModel = model;
+		this.writeConfig();
 	}
 
 	setMinGistInputChars(chars: number) {
 		this.config.minGistInputChars = Math.max(0, Math.round(chars));
+		this.writeConfig();
 		return this.config.minGistInputChars;
 	}
 
 	setStreamAudio(enabled: boolean) {
 		this.config.streamAudio = enabled;
+		this.writeConfig();
 	}
 
 	setShowGist(enabled: boolean) {
 		this.config.showGist = enabled;
+		this.writeConfig();
 	}
 
 	setDedupe(enabled: boolean) {
 		this.config.dedupe = enabled;
+		this.writeConfig();
 	}
 
 	status() {
@@ -517,14 +558,22 @@ class AnimeMonologueSpeaker {
 			const response = await complete(
 				model,
 				{
-					systemPrompt: `You transform hidden AI thinking traces into short spoken summaries. Always write in English. Do not reveal step-by-step reasoning. Compress the whole trace to the practical gist only. Style: brief dramatic anime inner monologue with a self-doubt-to-solution arc. Phrase uncertainty as a question or hesitant thought, not a flat statement. Use dramatic punctuation: ellipses for pauses, exclamation marks for resolve. Add subtle stutters for emotional weight, like "I... I must" or "I... could this be it?". Avoid repeating a fixed opening phrase. Do not add new facts, catchphrases, jokes, or ungrounded anime words. Serious, tense, and useful. Return only the spoken line itself: one or two complete sentences, maximum ${this.config.gistTargetWords} words. End with final punctuation. Do not start the line with punctuation. No emoji. No headings, titles, labels, prefaces, bullets, or markdown. If the thinking trace contains raw escape codes, regex sequences, or backslash patterns, describe them in words instead of outputting the raw characters.`,
+					systemPrompt: `You transform hidden AI thinking traces into short spoken summaries. Always write in natural American English. Never use British spellings or phrasing. Do not reveal step-by-step reasoning. Compress the whole trace to the practical gist only.
+
+Style: melodramatic anime protagonist inner monologue — breathless, trembling, barely-contained emotion. Picture a young hero alone in the rain, whispering to himself, voice cracking as he talks himself into courage. Start with a shaky, questioning whisper — heavy ellipses, staggered phrasing. Use [breath] and [exhale] markers for heavy breathing. Build into a desperate, determined resolve that feels physically overwhelming — like the words are being pulled from his chest.
+
+Tone: absurdly melodramatic, sincere, and breathy. Emotional crescendo from vulnerable to determined. Use American English contractions: "gotta", "'s gonna", "don't", "can't", "wanna". No "shall", "perhaps", "must", "shan't", or other British-coded words. No jokes, no irony — 100% committed to the dramatic bit.
+
+Punctuation: ellipses for breathy pauses, exclamation marks for breakthroughs, em-dashes for cut-offs. Stutters for emotional weight: "I... I can't...", "W-What if...", "Th-This is...". Sprinkle [breath] throughout.
+
+Rules: Return only the spoken line itself: one or two sentences, maximum ${this.config.gistTargetWords} words. Use [breath] naturally where pauses would be heavy. End with final punctuation. Do not start with punctuation. No emoji. No headings, titles, labels, prefaces, bullets, or markdown. If the trace contains raw escape codes or regex patterns, describe them in words.`,
 					messages: [
 						{
 							role: "user" as const,
 							content: [
 								{
 									type: "text" as const,
-									text: `<thinking_trace>\n${clippedTrace}\n</thinking_trace>\n\nReturn only the shortened dramatic line to be spoken aloud. Do not include any heading, label, emoji, or formatting. It should move from doubt to resolve while preserving the trace's actual conclusion. Use ellipses and exclamation marks for drama. Do not start with punctuation. If the trace contains escape codes or backslash patterns, describe them in words rather than outputting the raw characters.`,
+									text: `<thinking_trace>\n${clippedTrace}\n</thinking_trace>\n\nReturn only the breathy, dramatic inner monologue to be spoken aloud. American anime protagonist style. Use [breath] markers, ellipses, stutters. Start uncertain, arc into trembling, determined resolve. No emoji, no headings, no British English. If the trace contains escape codes or backslash patterns, describe them in words.`,
 								},
 							],
 							timestamp: Date.now(),
@@ -646,9 +695,9 @@ class AnimeMonologueSpeaker {
 			text: completeSpokenLine(text),
 			model_id: this.config.modelId,
 			voice_settings: {
-				stability: 0.35,
-				similarity_boost: 0.75,
-				style: 0.7,
+				stability: 0.15,
+				similarity_boost: 0.80,
+				style: 0.95,
 				use_speaker_boost: true,
 				speed: this.config.voiceSpeed,
 			},
@@ -789,7 +838,7 @@ export default function animeMonologue(pi: ExtensionAPI) {
 				case "speed": {
 					const speed = Number(rest[0]);
 					if (!Number.isFinite(speed)) {
-						ctx.ui.notify("Usage: /anime-monologue speed <0.7-1.2>", "error");
+						ctx.ui.notify("Usage: /anime-monologue speed <0.5-1.2>", "error");
 						break;
 					}
 					ctx.ui.notify(`Anime monologue speed set to ${speaker.setVoiceSpeed(speed)}.`, "info");
@@ -826,7 +875,6 @@ export default function animeMonologue(pi: ExtensionAPI) {
 					}
 					const voiceId = rest.join(" ");
 					speaker.setVoiceId(voiceId);
-					speaker.writeConfig();
 					ctx.ui.notify(`Anime monologue voice ID set to ${voiceId} and persisted to ${CONFIG_PATH}.`, "info");
 					break;
 				}
