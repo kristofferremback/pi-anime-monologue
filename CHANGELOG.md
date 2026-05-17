@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.4.0] – 2026-05-17
+
+### Added
+
+- All config setters (`setEnabled`, `setVoiceId`, `setVoiceSpeed`, `setLanguageCode`, `setGistTargetWords`, `setGistModel`, `setMinGistInputChars`, `setStreamAudio`, `setShowGist`, `setDedupe`) now auto-persist to `~/.pi/agent/anime-monologue.json` on every change.
+- TTS speed range expanded to `0.5`–`1.2` (was `0.7`–`1.2`).
+
+### Changed
+
+- **Voice design prompt**: Replaced "boyish, breathy" with bright, forward, nasal American anime VA twang. Explicitly bans British RP, Aussie lift, and rounded vowels. Targets Ichigo/Naruto/Eren/Deku vocal energy. Updated ElevenLabs voice design link and preview text.
+- **ElevenLabs voice settings**: Stability `0.35`→`0.15`, style `0.7`→`0.95`, similarity boost `0.75`→`0.80` for maximum expressiveness and dramatic delivery.
+- **LLM gist prompt**: Rewrote for breathy, melodramatic shonen anime style with `[breath]`/`[exhale]` markers, stutters, ellipses, and American English contractions. Bans British-coded words ("shall", "perhaps", "shan't").
+- **Local gist fallback**: Replaces British-coded phrasing ("must"→"gotta", "perhaps"→"maybe... just maybe", etc.) for consistency.
+- **Default TTS speed**: Lowered from `1.15` to `1.0`.
+
 ## [0.3.0] – 2026-05-17
 
 ### Added
