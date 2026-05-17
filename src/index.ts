@@ -14,8 +14,6 @@ const protectedEnvKeys = new Set(Object.keys(process.env));
 let loadedEnvPaths: string[] = [];
 let loadedEnvKeys = new Set<string>();
 
-type NarrationMode = "gist" | "raw";
-
 interface Config {
 	enabled: boolean;
 	apiKey?: string;
@@ -28,9 +26,6 @@ interface Config {
 	streamAudio: boolean;
 	showGist: boolean;
 	dedupe: boolean;
-	minChunkChars: number;
-	maxChunkChars: number;
-	narrationMode: NarrationMode;
 	gistUseLlm: boolean;
 	gistProvider?: string;
 	gistModel?: string;
@@ -132,10 +127,6 @@ function envBoolean(name: string, fallback: boolean) {
 	return !["0", "false", "off", "no"].includes(value.trim().toLowerCase());
 }
 
-function envNarrationMode(): NarrationMode {
-	return process.env.ANIME_MONOLOGUE_MODE?.trim().toLowerCase() === "raw" ? "raw" : "gist";
-}
-
 function envLanguageCode() {
 	const value = process.env.ELEVENLABS_LANGUAGE_CODE ?? process.env.ANIME_MONOLOGUE_LANGUAGE_CODE ?? "en";
 	const normalized = value.trim();
@@ -165,9 +156,6 @@ function readConfig(): Config {
 		streamAudio: envBoolean("ANIME_MONOLOGUE_STREAM_AUDIO", true),
 		showGist: envBoolean("ANIME_MONOLOGUE_SHOW_GIST", true),
 		dedupe: envBoolean("ANIME_MONOLOGUE_DEDUPE", true),
-		minChunkChars: envNumber("ANIME_MONOLOGUE_MIN_CHARS", 90),
-		maxChunkChars: envNumber("ANIME_MONOLOGUE_MAX_CHARS", 360),
-		narrationMode: envNarrationMode(),
 		gistUseLlm: envBoolean("ANIME_MONOLOGUE_GIST_LLM", true),
 		gistProvider: process.env.ANIME_MONOLOGUE_GIST_PROVIDER,
 		gistModel: process.env.ANIME_MONOLOGUE_GIST_MODEL,
@@ -181,23 +169,6 @@ function readConfig(): Config {
 
 function clamp(value: number, min: number, max: number) {
 	return Math.min(max, Math.max(min, value));
-}
-
-function sentenceBoundaryIndex(text: string, minChars: number, maxChars: number): number | undefined {
-	if (text.length < minChars) return undefined;
-
-	const softLimit = Math.min(text.length, maxChars);
-	const candidate = text.slice(0, softLimit);
-	const matches = [...candidate.matchAll(/[.!?。！？]\s+|\n+/g)];
-	const last = matches.at(-1);
-	if (last?.index !== undefined) return last.index + last[0].length;
-
-	if (text.length >= maxChars) {
-		const space = candidate.lastIndexOf(" ");
-		return space > minChars ? space + 1 : softLimit;
-	}
-
-	return undefined;
 }
 
 function normalizeForSpeech(text: string): string {
@@ -352,10 +323,6 @@ class AnimeMonologueSpeaker {
 		this.config.enabled = enabled;
 	}
 
-	setNarrationMode(mode: NarrationMode) {
-		this.config.narrationMode = mode;
-	}
-
 	setVoiceSpeed(speed: number) {
 		this.config.voiceSpeed = clamp(speed, 0.7, 1.2);
 		return this.config.voiceSpeed;
@@ -405,7 +372,6 @@ class AnimeMonologueSpeaker {
 			streamAudio: this.config.streamAudio,
 			showGist: this.config.showGist,
 			dedupe: this.config.dedupe,
-			narrationMode: this.config.narrationMode,
 			gistUseLlm: this.config.gistUseLlm,
 			gistProvider: this.config.gistProvider,
 			gistModel: this.config.gistModel,
@@ -418,34 +384,19 @@ class AnimeMonologueSpeaker {
 		};
 	}
 
-	handleThinkingDelta(delta: string, ctx: ExtensionContext) {
+	handleThinkingDelta(delta: string, _ctx: ExtensionContext) {
 		if (!this.config.enabled) return;
 		this.buffer += delta;
-
-		if (this.config.narrationMode === "gist") return;
-
-		let boundary: number | undefined;
-		while ((boundary = sentenceBoundaryIndex(this.buffer, this.config.minChunkChars, this.config.maxChunkChars)) !== undefined) {
-			const chunk = this.buffer.slice(0, boundary);
-			this.buffer = this.buffer.slice(boundary);
-			this.enqueue(chunk, ctx);
-		}
 	}
 
 	flush(ctx?: ExtensionContext) {
 		const trace = this.buffer.trim();
 		this.buffer = "";
-		this.speakThinkingTrace(trace, ctx);
+		this.enqueueGist(trace, ctx);
 	}
 
 	speakThinkingTrace(trace: string, ctx?: ExtensionContext) {
 		if (!this.config.enabled || !trace.trim()) return;
-
-		if (this.config.narrationMode === "raw") {
-			this.enqueue(trace, ctx);
-			return;
-		}
-
 		this.enqueueGist(trace, ctx);
 	}
 
@@ -780,7 +731,7 @@ export default function animeMonologue(pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("anime-monologue", {
-		description: "Control ElevenLabs narration of thinking traces: on | off | pause | gist | raw | speed | words | model | language | status | reload | test <text>",
+		description: "Control anime inner-monologue TTS narration: on | off | pause | speed | words | model | language | status | reload | test <text>",
 		handler: async (args, ctx) => {
 			const [command, ...rest] = args.trim().split(/\s+/);
 			switch (command) {
@@ -801,24 +752,6 @@ export default function animeMonologue(pi: ExtensionAPI) {
 					speaker.stop();
 					ctx.ui.notify("Anime monologue stopped and queued narration cleared. It will resume on the next thinking trace unless you turn it off.", "info");
 					break;
-				case "gist":
-					speaker.setNarrationMode("gist");
-					ctx.ui.notify("Anime monologue mode: full-block dramatic gist.", "info");
-					break;
-				case "raw":
-					speaker.setNarrationMode("raw");
-					ctx.ui.notify("Anime monologue mode: raw thinking trace chunks.", "info");
-					break;
-				case "mode": {
-					const mode = rest[0];
-					if (mode !== "gist" && mode !== "raw") {
-						ctx.ui.notify("Usage: /anime-monologue mode gist|raw", "error");
-						break;
-					}
-					speaker.setNarrationMode(mode);
-					ctx.ui.notify(`Anime monologue mode: ${mode}.`, "info");
-					break;
-				}
 				case "speed": {
 					const speed = Number(rest[0]);
 					if (!Number.isFinite(speed)) {
@@ -922,13 +855,13 @@ export default function animeMonologue(pi: ExtensionAPI) {
 				case undefined: {
 					const status = speaker.status();
 					ctx.ui.notify(
-						`Anime monologue: ${status.enabled ? "on" : "off"}, mode: ${status.narrationMode}${status.gistUseLlm ? " + LLM gist" : " + local gist"}, api key: ${status.hasApiKey ? "yes" : "no"}, voice: ${status.voiceId ?? "missing"}, model: ${status.modelId}, language: ${status.languageCode ?? "auto"}, speed: ${status.voiceSpeed}, stream: ${status.streamAudio ? "on" : "off"}, show gist: ${status.showGist ? "on" : "off"}, dedupe: ${status.dedupe ? "on" : "off"}, words: ${status.gistTargetWords}, min chars: ${status.minGistInputChars}, gist model: ${status.gistProvider && status.gistModel ? `${status.gistProvider}/${status.gistModel}` : "current Pi model"}, tts queue: ${status.queue}, gist queue: ${status.gistQueue}, env files: ${status.envFiles.length ? status.envFiles.join(", ") : "none"}`,
+						`Anime monologue: ${status.enabled ? "on" : "off"}, ${status.gistUseLlm ? "LLM gist" : "local gist"}, api key: ${status.hasApiKey ? "yes" : "no"}, voice: ${status.voiceId ?? "missing"}, model: ${status.modelId}, language: ${status.languageCode ?? "auto"}, speed: ${status.voiceSpeed}, stream: ${status.streamAudio ? "on" : "off"}, show gist: ${status.showGist ? "on" : "off"}, dedupe: ${status.dedupe ? "on" : "off"}, words: ${status.gistTargetWords}, min chars: ${status.minGistInputChars}, gist model: ${status.gistProvider && status.gistModel ? `${status.gistProvider}/${status.gistModel}` : "current Pi model"}, tts queue: ${status.queue}, gist queue: ${status.gistQueue}, env files: ${status.envFiles.length ? status.envFiles.join(", ") : "none"}`,
 						"info",
 					);
 					break;
 				}
 				default:
-					ctx.ui.notify("Usage: /anime-monologue on|off|pause|gist|raw|mode gist|mode raw|speed <n>|words <n>|model <provider> <model>|language <code>|min <chars>|stream on|off|show-gist on|off|dedupe on|off|status|reload|test <text>|think-test <trace>", "error");
+					ctx.ui.notify("Usage: /anime-monologue on|off|pause|speed <n>|words <n>|model <provider> <model>|language <code>|min <chars>|stream on|off|show-gist on|off|dedupe on|off|status|reload|test <text>|think-test <trace>", "error");
 			}
 		},
 	});

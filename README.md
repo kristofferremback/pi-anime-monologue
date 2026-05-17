@@ -56,12 +56,9 @@ Or install/copy this as a Pi package/extension. The package declares:
 ## Commands
 
 - `/anime-monologue status` - show config/status
-- `/anime-monologue on` - enable narration
+- `/anime-monologue on` - enable narration (produces a dramatic anime inner-monologue gist of the full thinking block)
 - `/anime-monologue off` - disable narration and clear queued audio
 - `/anime-monologue pause` - stop current playback and clear queued audio, but stay enabled for future thinking traces
-- `/anime-monologue gist` - speak a brief dramatic gist of each full thinking block
-- `/anime-monologue raw` - speak raw thinking chunks
-- `/anime-monologue mode gist|raw` - explicit mode switch
 - `/anime-monologue speed <0.7-1.2>` - set ElevenLabs voice speed for this runtime
 - `/anime-monologue words <8-120>` - set gist target length for this runtime
 - `/anime-monologue model <provider> <model>` - set gist model for this runtime
@@ -91,7 +88,6 @@ Shortcuts:
 | `ELEVENLABS_LANGUAGE_CODE` / `ANIME_MONOLOGUE_LANGUAGE_CODE` | `en` | ElevenLabs language code; set to `auto` via command to omit at runtime |
 | `ELEVENLABS_SPEED` / `ANIME_MONOLOGUE_SPEED` | `1.15` | Voice speed, clamped to ElevenLabs' typical `0.7`-`1.2` range |
 | `ANIME_MONOLOGUE_ENABLED` | `1` | Set to `0` to start disabled |
-| `ANIME_MONOLOGUE_MODE` | `gist` | `gist` for full-block dramatic summaries, `raw` for raw thinking chunks |
 | `ANIME_MONOLOGUE_GIST_LLM` | `1` | Set to `0` to use a local no-LLM dramatic trimmer |
 | `ANIME_MONOLOGUE_GIST_PROVIDER` | current Pi model | Optional provider for gist generation, e.g. `openai-codex` |
 | `ANIME_MONOLOGUE_GIST_MODEL` | current Pi model | Optional model id for gist generation |
