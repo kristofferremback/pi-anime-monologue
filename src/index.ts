@@ -292,6 +292,36 @@ class AnimeMonologueSpeaker {
 		this.config = readConfig();
 	}
 
+	writeConfig() {
+		const file: FileConfig = {
+			enabled: this.config.enabled,
+			elevenLabsApiKey: this.config.apiKey,
+			elevenLabsVoiceId: this.config.voiceId,
+			elevenLabsModelId: this.config.modelId,
+			elevenLabsOutputFormat: this.config.outputFormat,
+			languageCode: this.config.languageCode,
+			voiceSpeed: this.config.voiceSpeed,
+			player: this.config.player,
+			streamAudio: this.config.streamAudio,
+			showGist: this.config.showGist,
+			dedupe: this.config.dedupe,
+			gistUseLlm: this.config.gistUseLlm,
+			gistProvider: this.config.gistProvider,
+			gistModel: this.config.gistModel,
+			gistMaxInputChars: this.config.gistMaxInputChars,
+			gistTargetWords: this.config.gistTargetWords,
+			gistMaxTokens: this.config.gistMaxTokens,
+			minGistInputChars: this.config.minGistInputChars,
+			notify: this.config.notify,
+		};
+		try {
+			mkdirSync(dirname(CONFIG_PATH), { recursive: true });
+			writeFileSync(CONFIG_PATH, `${JSON.stringify(file, null, "\t")}\n`, { mode: 0o600 });
+		} catch {
+			// ignore write failures
+		}
+	}
+
 	isEnabled() {
 		return this.config.enabled;
 	}
@@ -796,7 +826,8 @@ export default function animeMonologue(pi: ExtensionAPI) {
 					}
 					const voiceId = rest.join(" ");
 					speaker.setVoiceId(voiceId);
-					ctx.ui.notify(`Anime monologue voice ID set to ${voiceId}.`, "info");
+					speaker.writeConfig();
+					ctx.ui.notify(`Anime monologue voice ID set to ${voiceId} and persisted to ${CONFIG_PATH}.`, "info");
 					break;
 				}
 				case "language": {
