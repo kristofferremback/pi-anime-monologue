@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.2.0] – 2026-05-17
+
+### Changed
+
+- Default to **off** for new sessions (`ANIME_MONOLOGUE_ENABLED=1` required to enable).
+- Persist enabled/disabled state across session resumes via `pi.appendEntry()`.
+- Status text in the footer now uses muted (`dim`) styling to match other footer elements.
+- Never show "anime monologue: off" in the footer — status is cleared when disabled.
+
 ## [0.1.0] – 2026-05-17
 
 ### Added
