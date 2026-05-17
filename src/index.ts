@@ -236,6 +236,8 @@ function completeSpokenLine(text: string) {
 	let line = normalizeForSpeech(stripLeadingGistDecorations(text))
 		.replace(/^['"“”]+|['"“”]+$/g, "")
 		.replace(/^[-–—\s]+/, "")
+		.replace(/^\.{2,}/, "")
+		.replace(/^…+/, "")
 		.trim();
 	line = stripLeadingGistDecorations(line);
 	if (!line) return "";
@@ -553,14 +555,14 @@ class AnimeMonologueSpeaker {
 			const response = await complete(
 				model,
 				{
-					systemPrompt: `You transform hidden AI thinking traces into short spoken summaries. Always write in English. Do not reveal step-by-step reasoning. Compress the whole trace to the practical gist only. Style: brief dramatic anime inner monologue with a self-doubt-to-solution arc: a flicker of uncertainty, then resolve. Avoid repeating a fixed opening phrase. Do not add new facts, catchphrases, jokes, or ungrounded anime words. Serious, tense, and useful. Return only the spoken line itself: one or two complete sentences, maximum ${this.config.gistTargetWords} words. End with final punctuation. No emoji. No headings, titles, labels, prefaces, bullets, or markdown.`,
+					systemPrompt: `You transform hidden AI thinking traces into short spoken summaries. Always write in English. Do not reveal step-by-step reasoning. Compress the whole trace to the practical gist only. Style: brief dramatic anime inner monologue with a self-doubt-to-solution arc. Phrase uncertainty as a question or hesitant thought, not a flat statement. Use dramatic punctuation: ellipses for pauses, exclamation marks for resolve. Add subtle stutters for emotional weight, like "I... I must" or "I... could this be it?". Avoid repeating a fixed opening phrase. Do not add new facts, catchphrases, jokes, or ungrounded anime words. Serious, tense, and useful. Return only the spoken line itself: one or two complete sentences, maximum ${this.config.gistTargetWords} words. End with final punctuation. Do not start the line with punctuation. No emoji. No headings, titles, labels, prefaces, bullets, or markdown. If the thinking trace contains raw escape codes, regex sequences, or backslash patterns, describe them in words instead of outputting the raw characters.`,
 					messages: [
 						{
 							role: "user" as const,
 							content: [
 								{
 									type: "text" as const,
-									text: `<thinking_trace>\n${clippedTrace}\n</thinking_trace>\n\nReturn only the shortened dramatic line to be spoken aloud. Do not include any heading, label, emoji, or formatting. It should move from doubt to resolve while preserving the trace's actual conclusion.`,
+									text: `<thinking_trace>\n${clippedTrace}\n</thinking_trace>\n\nReturn only the shortened dramatic line to be spoken aloud. Do not include any heading, label, emoji, or formatting. It should move from doubt to resolve while preserving the trace's actual conclusion. Use ellipses and exclamation marks for drama. Do not start with punctuation. If the trace contains escape codes or backslash patterns, describe them in words rather than outputting the raw characters.`,
 								},
 							],
 							timestamp: Date.now(),
