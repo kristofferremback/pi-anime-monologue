@@ -55,16 +55,25 @@ Or if installed as a package, it auto-loads.
 
 ## Suggested ElevenLabs voice
 
-This plugin was tuned with an anime protagonist inner-monologue Voice Design. You can recreate it from this [ElevenLabs voice design link](https://elevenlabs.io/app/voice-lab?action=create&creationType=voiceDesign&prompt=An+American+anime+dub+voice+actor+doing+a+breathy+inner+monologue+%E2%80%94+bright%2C+forward%2C+nasal+resonance+with+natural+twang.+Not+soft+or+round.+Not+%22boyish%22+in+a+sweet+sense.+Think+the+edgy%2C+crackling+energy+of+Ichigo%2C+Naruto%2C+Eren%2C+or+Deku+in+a+vulnerable+but+determined+moment.+Heavy+nasal+brightness%2C+forward-placed+vowels+%28hard+%27r%27+sounds%2C+flat+%27a%27%29.+Starts+with+a+raspy%2C+trembling+whisper+%5Bbreath%5D+%5Bexhale%5D%2C+then+climbs+into+a+strained%2C+almost+heroic+crackle.+Breathy+and+intense+but+grounded+in+American+vocal+fry+and+twang.+No+British+RP%2C+no+Aussie+lift%2C+no+rounded+vowels.+Melodramatic+but+sincere.&previewText=%5Bbreath%5D+I+can%27t...+I+can%27t+stop+now.+Not+when+I%27ve+come+this+far.+%5Bbreath%5D+My+heart+feels+like+it%27s+gonna+burst+but+%5Bexhale%5D+that%27s+fine...+that+just+means+I%27m+alive.+I+gotta+push+through.+I+gotta+see+what%27s+waiting+for+me+on+the+other+side%21&seed=59013&loudness=0.7&guidanceScale=3), then copy its voice ID into `ELEVENLABS_VOICE_ID`.
+This plugin is tuned for an Eleven v3 / Text-to-Dialogue-style anime protagonist inner-monologue voice: expressive enough to follow bracketed delivery tags, but paced slowly enough that ellipses and line breaks land. You can recreate it from this [ElevenLabs voice design link](https://elevenlabs.io/app/voice-lab?action=create&creationType=voiceDesign&prompt=A+young+adult+American+anime+dub+protagonist+performing+a+single-speaker+inner+monologue+for+Eleven+v3+%2F+Text+to+Dialogue.+Bright%2C+forward%2C+nasal+resonance+with+natural+American+twang%2C+hard+r+sounds%2C+flat+a+vowels%2C+and+a+little+raspy+vocal+fry.+Breathy+and+close-mic%2C+but+not+soft%2C+rounded%2C+sweet%2C+British%2C+or+Australian.+Emotionally+flexible%3A+starts+as+a+tense+whisper%2C+pauses+after+short+fragmented+thoughts%2C+then+catches+a+clue+and+rises+into+a+strained+heroic+resolve.+Pacing+should+be+scene-aware+and+unhurried%3A+clear+micro-pauses+after+ellipses+and+em+dashes%2C+audible+breaths+before+pivots%2C+no+machine-gun+delivery.+Think+modern+shonen+anime+dub+energy+in+a+vulnerable+but+determined+moment%3A+melodramatic%2C+sincere%2C+crackling%2C+and+grounded.&previewText=%5Bwhispering%5D+I...+I+don%27t+have+the+whole+answer+yet.%0A%5Bbreathes+in%5D+But+this+trace...+it%27s+not+chaos.+It%27s+pointing+somewhere%E2%80%94%0A%5Bvoice+breaking%5D+If+I+slow+down%2C+follow+the+clue%2C+and+make+the+next+move...+I+can+turn+this+around%21&seed=59013&loudness=0.65&guidanceScale=3), then copy its voice ID into `ELEVENLABS_VOICE_ID`.
+
+For the best pacing with the generated gist prompt, use an Eleven v3-capable model and a slightly slower speed if the delivery rushes:
+
+```bash
+export ELEVENLABS_MODEL_ID="eleven_v3"
+export ELEVENLABS_SPEED="0.92"
+```
 
 Readable settings from that link:
 
 ```text
 Voice prompt:
-An American anime dub voice actor doing a breathy inner monologue — bright, forward, nasal resonance with natural twang. Not soft or round. Not "boyish" in a sweet sense. Think the edgy, crackling energy of Ichigo, Naruto, Eren, or Deku in a vulnerable but determined moment. Heavy nasal brightness, forward-placed vowels (hard 'r' sounds, flat 'a'). Starts with a raspy, trembling whisper [breath] [exhale], then climbs into a strained, almost heroic crackle. Breathy and intense but grounded in American vocal fry and twang. No British RP, no Aussie lift, no rounded vowels. Melodramatic but sincere.
+A young adult American anime dub protagonist performing a single-speaker inner monologue for Eleven v3 / Text to Dialogue. Bright, forward, nasal resonance with natural American twang, hard r sounds, flat a vowels, and a little raspy vocal fry. Breathy and close-mic, but not soft, rounded, sweet, British, or Australian. Emotionally flexible: starts as a tense whisper, pauses after short fragmented thoughts, then catches a clue and rises into a strained heroic resolve. Pacing should be scene-aware and unhurried: clear micro-pauses after ellipses and em dashes, audible breaths before pivots, no machine-gun delivery. Think modern shonen anime dub energy in a vulnerable but determined moment: melodramatic, sincere, crackling, and grounded.
 
 Preview text:
-[breath] I can't... I can't stop now. Not when I've come this far. [breath] My heart feels like it's gonna burst but [exhale] that's fine... that just means I'm alive. I gotta push through. I gotta see what's waiting for me on the other side!
+[whispering] I... I don't have the whole answer yet.
+[breathes in] But this trace... it's not chaos. It's pointing somewhere—
+[voice breaking] If I slow down, follow the clue, and make the next move... I can turn this around!
 
 Seed:
 59013
@@ -87,6 +96,7 @@ Guidance scale:
 | `/anime-monologue pause` | Stop playback and clear queue, stay enabled |
 | `/anime-monologue speed <0.5-1.2>` | Set voice speed |
 | `/anime-monologue voice [id]` | Set voice ID (show current if omitted) |
+| `/anime-monologue tts-model [id]` | Set ElevenLabs TTS model; use `eleven_v3` for audio tags |
 | `/anime-monologue words <8-120>` | Set gist target length |
 | `/anime-monologue model <provider> <model>` | Set gist LLM provider/model |
 | `/anime-monologue model current` | Use current Pi model for gists |
@@ -124,10 +134,10 @@ Environment variables override matching config-file values.
 | --- | --- | --- |
 | `ELEVENLABS_API_KEY` | required | ElevenLabs API key |
 | `ELEVENLABS_VOICE_ID` | required | Voice ID to use |
-| `ELEVENLABS_MODEL_ID` | `eleven_multilingual_v2` | ElevenLabs model |
+| `ELEVENLABS_MODEL_ID` | `eleven_v3` | ElevenLabs model; v2 models may read bracketed delivery tags aloud |
 | `ELEVENLABS_OUTPUT_FORMAT` | `mp3_44100_128` | Output format |
 | `ELEVENLABS_LANGUAGE_CODE` / `ANIME_MONOLOGUE_LANGUAGE_CODE` | `en` | Language code |
-| `ELEVENLABS_SPEED` / `ANIME_MONOLOGUE_SPEED` | `1.0` | Voice speed (`0.5`–`1.2`) |
+| `ELEVENLABS_SPEED` / `ANIME_MONOLOGUE_SPEED` | `1.0` | Voice speed (`0.5`–`1.2`); try `0.9`–`0.95` if the monologue rushes |
 | `ANIME_MONOLOGUE_ENABLED` | `0` | Set to `1` to start enabled |
 | `ANIME_MONOLOGUE_GIST_LLM` | `1` | Set to `0` for local-only gist trimming |
 | `ANIME_MONOLOGUE_GIST_PROVIDER` | current Pi model | Provider for gist generation |
@@ -160,4 +170,4 @@ pi-anime-monologue/
 - The extension only receives thinking traces when the active provider/model emits Pi `thinking` content.
 - If thinking blocks show only `Thinking...`, Pi's built-in thinking display is collapsed; press `Ctrl+T` in Pi to toggle hidden thinking blocks.
 - TTS/playback runs in a background queue so it should not block Pi streaming.
-- Gist mode asks the configured/current Pi model for a brief full-block summary with a self-doubt-to-solution dramatic arc, and explicitly tells it not to reveal step-by-step reasoning or add catchphrases/new facts.
+- Gist mode asks the configured/current Pi model for a brief 2–3 beat summary with an uncertain-whisper → breath/pivot → determined-landing arc, and explicitly tells it not to reveal step-by-step reasoning or add catchphrases/new facts.

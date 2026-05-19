@@ -125,7 +125,7 @@ function readConfig(): Config {
 		enabled: envOrFileBoolean("ANIME_MONOLOGUE_ENABLED", file.enabled, false),
 		apiKey: envOrFile("ELEVENLABS_API_KEY", file.elevenLabsApiKey),
 		voiceId: envOrFile("ELEVENLABS_VOICE_ID", file.elevenLabsVoiceId),
-		modelId: envOrFile("ELEVENLABS_MODEL_ID", file.elevenLabsModelId) ?? "eleven_multilingual_v2",
+		modelId: envOrFile("ELEVENLABS_MODEL_ID", file.elevenLabsModelId) ?? "eleven_v3",
 		outputFormat: envOrFile("ELEVENLABS_OUTPUT_FORMAT", file.elevenLabsOutputFormat) ?? "mp3_44100_128",
 		languageCode: envLanguageCode(file.languageCode),
 		voiceSpeed: clamp(envOrFileNumber("ELEVENLABS_SPEED", file.voiceSpeed, speedFallback), 0.5, 1.2),
@@ -150,15 +150,27 @@ function clamp(value: number, min: number, max: number) {
 
 function normalizeForSpeech(text: string): string {
 	return text
-		.replace(/```[\s\S]*?```/g, " code block ")
+		.replace(/```[\s\S]*?```/g, "\ncode block\n")
 		.replace(/`([^`]+)`/g, "$1")
 		.replace(/https?:\/\/\S+/g, "a link")
-		.replace(/\s+/g, " ")
+		.replace(/\r\n?/g, "\n")
+		.split("\n")
+		.map((line) => line.replace(/[ \t\f\v]+/g, " ").trim())
+		.join("\n")
+		.replace(/\n{3,}/g, "\n\n")
 		.trim();
 }
 
 function normalizeKey(text: string) {
 	return normalizeForSpeech(text).toLowerCase();
+}
+
+function isElevenV3Model(modelId: string) {
+	return /(?:^|[_-])v?3(?:$|[_-])/i.test(modelId);
+}
+
+function stripDeliveryTags(text: string) {
+	return text.replace(/\s*\[[a-z][a-z -]{0,40}\]\s*/gi, " ").replace(/[ \t\f\v]+/g, " ").trim();
 }
 
 function clipMiddle(text: string, maxChars: number) {
@@ -220,6 +232,10 @@ function completeSpokenLine(text: string) {
 	return line.replace(/[,:;–—\s]+$/g, "") + ".";
 }
 
+function stripTerminalPunctuation(text: string) {
+	return text.replace(/[.!?…]+$/g, "").replace(/[,:;–—\s]+$/g, "").trim();
+}
+
 function localDramaticGist(trace: string, targetWords: number) {
 	const trimmed = sentenceAwareTruncate(normalizeForSpeech(trace), Math.max(8, targetWords))
 		.replace(/\bI need to\b/gi, "I gotta")
@@ -237,7 +253,19 @@ function localDramaticGist(trace: string, targetWords: number) {
 		.replace(/\bi have\b/gi, "I've")
 		.replace(/([.!?])/g, "$1")
 		.trim();
-	return completeSpokenLine(trimmed);
+	const words = firstWords(trimmed, Math.max(8, targetWords)).split(/\s+/).filter(Boolean);
+	if (words.length <= 14) return completeSpokenLine(`[whispering] ${stripTerminalPunctuation(words.join(" "))}...`);
+
+	const firstCount = Math.min(12, Math.max(6, Math.round(words.length * 0.25)));
+	const secondCount = Math.min(18, Math.max(8, Math.round(words.length * 0.35)));
+	const first = stripTerminalPunctuation(words.slice(0, firstCount).join(" "));
+	const second = stripTerminalPunctuation(words.slice(firstCount, firstCount + secondCount).join(" "));
+	const third = stripTerminalPunctuation(words.slice(firstCount + secondCount).join(" "));
+
+	const beats = [`[whispering] ${first}...`];
+	if (second) beats.push(`[breathes in] ${second}${third ? "—" : "."}`);
+	if (third) beats.push(`[determined] ${third}.`);
+	return completeSpokenLine(beats.join("\n"));
 }
 
 function extractText(content: unknown): string {
@@ -366,6 +394,12 @@ class AnimeMonologueSpeaker {
 		this.config.voiceId = voiceId?.trim() || undefined;
 		this.writeConfig();
 		return this.config.voiceId;
+	}
+
+	setElevenLabsModelId(modelId: string | undefined) {
+		this.config.modelId = modelId?.trim() || "eleven_v3";
+		this.writeConfig();
+		return this.config.modelId;
 	}
 
 	setVoiceSpeed(speed: number) {
@@ -558,22 +592,24 @@ class AnimeMonologueSpeaker {
 			const response = await complete(
 				model,
 				{
-					systemPrompt: `You transform hidden AI thinking traces into short spoken summaries. Always write in natural American English. Never use British spellings or phrasing. Do not reveal step-by-step reasoning. Compress the whole trace to the practical gist only.
+					systemPrompt: `You transform hidden AI thinking traces into a compact, TTS-ready single-speaker turn for ElevenLabs Eleven v3 / Text to Dialogue. Always write in natural American English. Never use British spellings or phrasing. Summarize only the practical gist: the obstacle, the pivot, and the next move. Do not reveal step-by-step reasoning, chain-of-thought, private deliberation, tool logs, or hidden trace details.
 
-Style: melodramatic anime protagonist inner monologue — breathless, trembling, barely-contained emotion. Picture a young hero alone in the rain, whispering to himself, voice cracking as he talks himself into courage. Start with a shaky, questioning whisper — heavy ellipses, staggered phrasing. Use [breath] and [exhale] markers for heavy breathing. Build into a desperate, determined resolve that feels physically overwhelming — like the words are being pulled from his chest.
+Style: melodramatic American anime protagonist inner monologue — breathy, bright, forward, raspy, trembling, and sincere. The performance should feel like one continuous scene, not a slogan: a young hero thinks he's cornered, catches the crucial clue, then forces himself into action.
 
-Tone: absurdly melodramatic, sincere, and breathy. Emotional crescendo from vulnerable to determined. Use American English contractions: "gotta", "'s gonna", "don't", "can't", "wanna". No "shall", "perhaps", "must", "shan't", or other British-coded words. No jokes, no irony — 100% committed to the dramatic bit.
+Pacing shape: Use 2–3 short beats, preferably on separate lines. Beat 1 is an uncertain whisper with a fragile fragment. Beat 2 is the realization or pivot, with a breath or sigh and a slightly longer phrase. Beat 3 lands the practical gist with trembling resolve. Keep clauses short. Use ellipses for trailing thoughts, em dashes for interruptions, and a final period or exclamation only when the breakthrough earns it.
 
-Punctuation: ellipses for breathy pauses, exclamation marks for breakthroughs, em-dashes for cut-offs. Stutters for emotional weight: "I... I can't...", "W-What if...", "Th-This is...". Sprinkle [breath] throughout.
+Eleven v3 delivery tags: Use at most three bracketed voice/delivery tags total, placed where the delivery changes. Prefer natural tags such as [whispering], [sigh], [breathes in], [exhales], [voice breaking], [thoughtful], [urgent], or [determined]. Do not use sound effects, music, environmental tags, speaker labels, SSML, or <break> tags. Do not spam tags.
 
-Rules: Return only the spoken line itself: one or two sentences, maximum ${this.config.gistTargetWords} words. Use [breath] naturally where pauses would be heavy. End with final punctuation. Do not start with punctuation. No emoji. No headings, titles, labels, prefaces, bullets, or markdown. If the trace contains raw escape codes or regex patterns, describe them in words.`,
+Tone: absurdly melodramatic but sincere. Vulnerable first, then focused. Use American English contractions: "gotta", "'s gonna", "don't", "can't", "wanna". No "shall", "perhaps", "must", "shan't", or other British-coded words. No jokes, no irony, no catchphrases, no new facts.
+
+Rules: Return only the spoken turn itself: maximum ${this.config.gistTargetWords} words. End with final punctuation. Do not start with punctuation. No emoji. No headings, titles, labels, prefaces, bullets, markdown, or quotation marks. If the trace contains raw escape codes or regex patterns, describe them in words.`,
 					messages: [
 						{
 							role: "user" as const,
 							content: [
 								{
 									type: "text" as const,
-									text: `<thinking_trace>\n${clippedTrace}\n</thinking_trace>\n\nReturn only the breathy, dramatic inner monologue to be spoken aloud. American anime protagonist style. Use [breath] markers, ellipses, stutters. Start uncertain, arc into trembling, determined resolve. No emoji, no headings, no British English. If the trace contains escape codes or backslash patterns, describe them in words.`,
+									text: `<thinking_trace>\n${clippedTrace}\n</thinking_trace>\n\nWrite the Eleven v3-ready inner monologue turn now. Follow the 2–3 beat pacing: uncertain whisper, breath or sigh pivot, determined landing. Use no more than three voice/delivery tags, no sound effects or music, no SSML, no headings, no British English, and no step-by-step reasoning. If the trace contains escape codes or backslash patterns, describe them in words.`,
 								},
 							],
 							timestamp: Date.now(),
@@ -691,8 +727,12 @@ Rules: Return only the spoken line itself: one or two sentences, maximum ${this.
 
 		this.abortController = new AbortController();
 		const url = `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(this.config.voiceId)}/stream?output_format=${encodeURIComponent(this.config.outputFormat)}`;
+		const spokenLine = completeSpokenLine(text);
+		const textForModel = isElevenV3Model(this.config.modelId) ? spokenLine : stripDeliveryTags(spokenLine);
+		if (!textForModel) return;
+
 		const body: Record<string, unknown> = {
-			text: completeSpokenLine(text),
+			text: textForModel,
 			model_id: this.config.modelId,
 			voice_settings: {
 				stability: 0.15,
@@ -812,7 +852,7 @@ export default function animeMonologue(pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("anime-monologue", {
-		description: "Control anime inner-monologue TTS narration: on | off | pause | onboard | speed | voice | words | model | language | status | reload | test <text>",
+		description: "Control anime inner-monologue TTS narration: on | off | pause | onboard | speed | voice | tts-model | words | model | language | status | reload | test <text>",
 		handler: async (args, ctx) => {
 			const [command, ...rest] = args.trim().split(/\s+/);
 			switch (command) {
@@ -876,6 +916,17 @@ export default function animeMonologue(pi: ExtensionAPI) {
 					const voiceId = rest.join(" ");
 					speaker.setVoiceId(voiceId);
 					ctx.ui.notify(`Anime monologue voice ID set to ${voiceId} and persisted to ${CONFIG_PATH}.`, "info");
+					break;
+				}
+				case "tts-model":
+				case "eleven-model": {
+					if (!rest[0]) {
+						ctx.ui.notify(`Anime monologue ElevenLabs TTS model: ${speaker.status().modelId}`, "info");
+						break;
+					}
+					const modelId = ["default", "v3"].includes(rest[0].toLowerCase()) ? "eleven_v3" : rest[0];
+					speaker.setElevenLabsModelId(modelId);
+					ctx.ui.notify(`Anime monologue ElevenLabs TTS model set to ${modelId} and persisted to ${CONFIG_PATH}.`, "info");
 					break;
 				}
 				case "language": {
@@ -1039,7 +1090,7 @@ export default function animeMonologue(pi: ExtensionAPI) {
 					break;
 				}
 				default:
-					ctx.ui.notify("Usage: /anime-monologue on|off|pause|onboard|speed <n>|voice [id]|words <n>|model <provider> <model>|language <code>|min <chars>|stream on|off|show-gist on|off|dedupe on|off|status|reload|test <text>|think-test <trace>", "error");
+					ctx.ui.notify("Usage: /anime-monologue on|off|pause|onboard|speed <n>|voice [id]|tts-model [id]|words <n>|model <provider> <model>|language <code>|min <chars>|stream on|off|show-gist on|off|dedupe on|off|status|reload|test <text>|think-test <trace>", "error");
 			}
 		},
 	});

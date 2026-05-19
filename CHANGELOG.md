@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **Voice design prompt**: Updated the suggested ElevenLabs voice for Eleven v3 / Text-to-Dialogue-style pacing, with slower scene-aware cadence, clearer breath pivots, and bracketed delivery tags in the preview text.
+- **LLM gist prompt**: Reworked the summary prompt into a 2–3 beat structure: uncertain whisper → breath/sigh pivot → determined landing, using at most three Eleven v3 voice/delivery tags.
+- **Speech normalization**: Preserve line breaks in generated gists so Eleven v3 can use text structure for pacing instead of flattening everything into one line.
+- **ElevenLabs model default**: Default TTS model is now `eleven_v3`, and `/anime-monologue tts-model [id]` can set or inspect it at runtime.
+- **Non-v3 fallback**: Strip bracketed delivery tags before TTS when using a non-v3 ElevenLabs model so tags are not read aloud literally.
+- **Local gist fallback**: Shapes fallback summaries into paced beats with `[whispering]`, `[breathes in]`, and `[determined]` delivery cues.
+
 ## [0.4.0] – 2026-05-17
 
 ### Added
