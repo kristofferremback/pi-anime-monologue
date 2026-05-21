@@ -5,7 +5,7 @@
 
 A Pi extension that listens for assistant `thinking` trace deltas, trims them into short dramatic anime inner-monologue gists, sends those to ElevenLabs TTS, and plays the returned audio locally.
 
-By default it leaves Pi's displayed thinking traces alone, waits for the full thinking block, then summarizes that whole block for speech. The gist step uses Pi's current model/auth unless configured otherwise. Set `ANIME_MONOLOGUE_MODE=raw` if you want the old behavior that speaks raw trace chunks.
+By default it leaves Pi's displayed thinking traces alone, waits for the full thinking block, then summarizes that whole block for speech. The gist step uses Pi's current model/auth unless configured otherwise.
 
 ## Install
 
@@ -91,12 +91,16 @@ Guidance scale:
 | --- | --- |
 | `/anime-monologue status` | Show config and status |
 | `/anime-monologue onboard` | Guided setup; writes `~/.pi/agent/anime-monologue.json` |
+| `/anime-monologue setup` | Alias for `onboard` |
 | `/anime-monologue on` | Enable narration |
 | `/anime-monologue off` | Disable narration and clear queued audio |
 | `/anime-monologue pause` | Stop playback and clear queue, stay enabled |
+| `/anime-monologue stop` | Alias for `pause` |
+| `/anime-monologue shut-up` | Alias for `pause` |
 | `/anime-monologue speed <0.5-1.2>` | Set voice speed |
 | `/anime-monologue voice [id]` | Set voice ID (show current if omitted) |
 | `/anime-monologue tts-model [id]` | Set ElevenLabs TTS model; use `eleven_v3` for audio tags |
+| `/anime-monologue eleven-model [id]` | Alias for `tts-model` |
 | `/anime-monologue words <8-120>` | Set gist target length |
 | `/anime-monologue model <provider> <model>` | Set gist LLM provider/model |
 | `/anime-monologue model current` | Use current Pi model for gists |
@@ -109,6 +113,7 @@ Guidance scale:
 | `/anime-monologue reload` | Reload config from environment and `~/.pi/agent/anime-monologue.json` |
 | `/anime-monologue test <text>` | Speak a raw test line |
 | `/anime-monologue think-test <trace>` | Run fake trace through gist pipeline |
+| `/anime-monologue gist-test <trace>` | Alias for `think-test` |
 
 ### Shortcuts
 
@@ -152,6 +157,7 @@ Environment variables override matching config-file values.
 | `ANIME_MONOLOGUE_SHOW_GIST` | `1` | Show spoken gist as Pi notification |
 | `ANIME_MONOLOGUE_DEDUPE` | `1` | Skip duplicate traces/gists |
 | `ANIME_MONOLOGUE_REVERB` | `0` | Enable cheesy sox reverb post-processing |
+| `ANIME_MONOLOGUE_NOTIFY` | `0` | Show warning notifications on LLM gist failures or missing gist models |
 | `ANIME_MONOLOGUE_PLAYER` | auto | Override player command |
 
 ## Package structure

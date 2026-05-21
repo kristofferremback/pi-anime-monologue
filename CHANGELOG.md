@@ -1,10 +1,12 @@
 # Changelog
 
-## Unreleased
+## [0.5.0] – 2026-05-21
 
 ### Added
 
 - **Cheesy reverb**: Post-process ElevenLabs TTS audio through sox `reverb` for dramatic anime inner-monologue echo. Toggle via `/anime-monologue reverb on|off`, `Ctrl+Alt+R` shortcut, or `ANIME_MONOLOGUE_REVERB` env var. Requires `sox` (`brew install sox`).
+- **Warning notifications**: New `ANIME_MONOLOGUE_NOTIFY` env var (default `0`) enables warning notifications when LLM gist generation fails or a configured gist model is not found.
+- **Command aliases**: `setup` (alias for `onboard`), `stop`/`shut-up` (aliases for `pause`), `gist-test` (alias for `think-test`), `eleven-model` (alias for `tts-model`).
 
 ### Changed
 
