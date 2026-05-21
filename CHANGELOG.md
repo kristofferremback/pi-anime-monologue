@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- **Cheesy reverb**: Post-process ElevenLabs TTS audio through sox `reverb` for dramatic anime inner-monologue echo. Toggle via `/anime-monologue reverb on|off`, `Ctrl+Alt+R` shortcut, or `ANIME_MONOLOGUE_REVERB` env var. Requires `sox` (`brew install sox`).
+
 ### Changed
 
 - **Voice design prompt**: Updated the suggested ElevenLabs voice for Eleven v3 / Text-to-Dialogue-style pacing, with slower scene-aware cadence, clearer breath pivots, and bracketed delivery tags in the preview text.

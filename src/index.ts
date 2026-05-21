@@ -28,6 +28,7 @@ interface Config {
 	gistMaxTokens: number;
 	minGistInputChars: number;
 	notify: boolean;
+	reverb: boolean;
 }
 
 interface QueueItem {
@@ -61,6 +62,7 @@ type FileConfig = Partial<{
 	gistMaxTokens: number;
 	minGistInputChars: number;
 	notify: boolean;
+	reverb: boolean;
 }>;
 
 const CONFIG_PATH = join(homedir(), ".pi", "agent", "anime-monologue.json");
@@ -141,6 +143,7 @@ function readConfig(): Config {
 		gistMaxTokens: envOrFileNumber("ANIME_MONOLOGUE_GIST_MAX_TOKENS", file.gistMaxTokens, 240),
 		minGistInputChars: envOrFileNumber("ANIME_MONOLOGUE_MIN_GIST_INPUT_CHARS", file.minGistInputChars, 120),
 		notify: envOrFileBoolean("ANIME_MONOLOGUE_NOTIFY", file.notify, false),
+		reverb: envOrFileBoolean("ANIME_MONOLOGUE_REVERB", file.reverb, false),
 	};
 }
 
@@ -346,6 +349,7 @@ class AnimeMonologueSpeaker {
 	private stopGeneration = 0;
 	private lastTraceKey?: string;
 	private lastGistKey?: string;
+	private soxAvailable: boolean | undefined;
 
 	reloadConfig() {
 		this.config = readConfig();
@@ -372,6 +376,7 @@ class AnimeMonologueSpeaker {
 			gistMaxTokens: this.config.gistMaxTokens,
 			minGistInputChars: this.config.minGistInputChars,
 			notify: this.config.notify,
+			reverb: this.config.reverb,
 		};
 		try {
 			mkdirSync(dirname(CONFIG_PATH), { recursive: true });
@@ -448,6 +453,11 @@ class AnimeMonologueSpeaker {
 		this.writeConfig();
 	}
 
+	setReverb(enabled: boolean) {
+		this.config.reverb = enabled;
+		this.writeConfig();
+	}
+
 	status() {
 		return {
 			enabled: this.config.enabled,
@@ -467,6 +477,8 @@ class AnimeMonologueSpeaker {
 			queue: this.queue.length,
 			gistQueue: this.gistQueue.length,
 			bufferChars: this.buffer.length,
+			reverb: this.config.reverb,
+			soxAvailable: this.soxAvailable,
 		};
 	}
 
@@ -484,6 +496,12 @@ class AnimeMonologueSpeaker {
 	speakThinkingTrace(trace: string, ctx?: ExtensionContext) {
 		if (!this.config.enabled || !trace.trim()) return;
 		this.enqueueGist(trace, ctx);
+	}
+
+	async checkSoxAvailable(): Promise<boolean> {
+		if (this.soxAvailable !== undefined) return this.soxAvailable;
+		this.soxAvailable = await commandExists("sox");
+		return this.soxAvailable;
 	}
 
 	stop() {
@@ -716,6 +734,102 @@ Rules: Return only the spoken turn itself: maximum ${this.config.gistTargetWords
 		}
 	}
 
+	private async applyReverbToFile(inputPath: string): Promise<string> {
+		const outputPath = join(tmpdir(), `${EXTENSION_NAME}-reverb-${Date.now()}-${Math.random().toString(16).slice(2)}.mp3`);
+		await new Promise<void>((resolve, reject) => {
+			const child = spawn("sox", [
+				inputPath,
+				outputPath,
+				"reverb", "65", "75", "50", "60", "5", "4",
+			]);
+			child.on("error", reject);
+			child.on("close", (code) => {
+				code === 0 ? resolve() : reject(new Error(`sox reverb exited ${code}`));
+			});
+			child.stderr?.on("data", () => {});
+		});
+		return outputPath;
+	}
+
+	private async playAudioStreamWithReverb(body: ReadableStream<Uint8Array>, player: { command: string; args: string[] }) {
+		const audioStream = Readable.fromWeb(body as any);
+		const sox = spawn("sox", [
+			"-t", "mp3", "-",
+			"-t", "mp3", "-",
+			"reverb", "65", "75", "50", "60", "5", "4",
+		]);
+		const child = spawn(player.command, player.args, { stdio: ["pipe", "ignore", "ignore"] });
+		this.playerProcess = child;
+
+		await new Promise<void>((resolve, reject) => {
+			let settled = false;
+			const cleanup = () => {
+				if (settled) return;
+				settled = true;
+				audioStream.destroy();
+				sox.kill("SIGTERM");
+				child.kill("SIGTERM");
+				if (this.playerProcess === child) this.playerProcess = undefined;
+			};
+
+			const finish = (error?: Error) => {
+				cleanup();
+				if (error) reject(error);
+				else resolve();
+			};
+
+			child.on("error", finish);
+			child.on("close", (code, signal) => {
+				if (signal === "SIGTERM" || signal === "SIGKILL") return finish();
+				return code === 0 ? finish() : finish(new Error(`${player.command} exited ${code}`));
+			});
+			sox.on("error", finish);
+
+			audioStream.on("error", (error) => {
+				finish(error instanceof Error ? error : new Error(String(error)));
+			});
+
+			if (!child.stdin) { finish(new Error(`${player.command} did not expose stdin`)); return; }
+			if (!sox.stdin || !sox.stdout) { finish(new Error("sox did not expose stdin/stdout")); return; }
+
+			child.stdin.on("error", (err: NodeJS.ErrnoException) => {
+				if (err.code === "EPIPE") return;
+				finish(err);
+			});
+			sox.stdin.on("error", (err: NodeJS.ErrnoException) => {
+				if (err.code === "EPIPE") return;
+				finish(err);
+			});
+
+			audioStream.pipe(sox.stdin);
+			sox.stdout.pipe(child.stdin);
+		});
+	}
+
+	private async playAudioFileWithReverb(bytes: Buffer) {
+		const rawPath = join(tmpdir(), `${EXTENSION_NAME}-raw-${Date.now()}-${Math.random().toString(16).slice(2)}.mp3`);
+		await fs.writeFile(rawPath, bytes);
+		let reverbPath: string | undefined;
+
+		try {
+			reverbPath = await this.applyReverbToFile(rawPath);
+			const player = await chooseFilePlayer(this.config.player);
+			await new Promise<void>((resolve, reject) => {
+				const child = spawn(player.command, [...player.args, reverbPath!], { stdio: "ignore" });
+				this.playerProcess = child;
+				child.on("error", reject);
+				child.on("close", (code, signal) => {
+					if (this.playerProcess === child) this.playerProcess = undefined;
+					if (signal === "SIGTERM" || signal === "SIGKILL") return resolve();
+					return code === 0 ? resolve() : reject(new Error(`${player.command} exited ${code}`));
+				});
+			});
+		} finally {
+			await fs.rm(rawPath, { force: true });
+			if (reverbPath) await fs.rm(reverbPath, { force: true });
+		}
+	}
+
 	private async speak(text: string) {
 		if (!this.config.apiKey || !this.config.voiceId) {
 			if (!this.announcedMissingConfig) {
@@ -763,12 +877,21 @@ Rules: Return only the spoken turn itself: maximum ${this.config.gistTargetWords
 		if (this.config.streamAudio && response.body) {
 			const streamingPlayer = await chooseStreamingPlayer(this.config.player);
 			if (streamingPlayer) {
-				await this.playAudioStream(response.body, streamingPlayer);
+				if (this.config.reverb && await this.checkSoxAvailable()) {
+					await this.playAudioStreamWithReverb(response.body, streamingPlayer);
+				} else {
+					await this.playAudioStream(response.body, streamingPlayer);
+				}
 				return;
 			}
 		}
 
-		await this.playAudioFile(Buffer.from(await response.arrayBuffer()));
+		const buffer = Buffer.from(await response.arrayBuffer());
+		if (this.config.reverb && await this.checkSoxAvailable()) {
+			await this.playAudioFileWithReverb(buffer);
+		} else {
+			await this.playAudioFile(buffer);
+		}
 	}
 }
 
@@ -848,6 +971,24 @@ export default function animeMonologue(pi: ExtensionAPI) {
 			ctx.ui.setStatus(EXTENSION_NAME, theme.fg("dim", "anime monologue: on"));
 			pi.appendEntry(`${EXTENSION_NAME}-state`, { enabled: true });
 			ctx.ui.notify("Anime monologue enabled.", "info");
+		},
+	});
+
+	pi.registerShortcut("ctrl+alt+r", {
+		description: "Toggle cheesy reverb on anime monologue playback",
+		handler: async (ctx) => {
+			const status = speaker.status();
+			if (status.reverb) {
+				speaker.setReverb(false);
+				ctx.ui.notify("Anime monologue reverb disabled.", "info");
+				return;
+			}
+			if (!(await speaker.checkSoxAvailable())) {
+				ctx.ui.notify("Anime monologue reverb requires sox. Install it with: brew install sox", "warning");
+				return;
+			}
+			speaker.setReverb(true);
+			ctx.ui.notify("Anime monologue cheesy reverb enabled.", "info");
 		},
 	});
 
@@ -975,6 +1116,19 @@ export default function animeMonologue(pi: ExtensionAPI) {
 					ctx.ui.notify(`Anime monologue dedupe ${enabled ? "enabled" : "disabled"}.`, "info");
 					break;
 				}
+				case "reverb": {
+					const enabled = parseOnOff(rest[0]);
+					if (enabled === undefined) {
+						ctx.ui.notify("Usage: /anime-monologue reverb on|off", "error");
+						break;
+					}
+					if (enabled && !(await speaker.checkSoxAvailable())) {
+						ctx.ui.notify("Anime monologue reverb requires sox to be installed. Install it with: brew install sox", "warning");
+					}
+					speaker.setReverb(enabled);
+					ctx.ui.notify(`Anime monologue cheesy reverb ${enabled ? "enabled" : "disabled"}.`, "info");
+					break;
+				}
 				case "onboard":
 				case "setup": {
 					speaker.reloadConfig();
@@ -1084,13 +1238,13 @@ export default function animeMonologue(pi: ExtensionAPI) {
 				case undefined: {
 					const status = speaker.status();
 					ctx.ui.notify(
-						`Anime monologue: ${status.enabled ? "on" : "off"}, ${status.gistUseLlm ? "LLM gist" : "local gist"}, api key: ${status.hasApiKey ? "yes" : "no"}, voice: ${status.voiceId ?? "missing"}, model: ${status.modelId}, language: ${status.languageCode ?? "auto"}, speed: ${status.voiceSpeed}, stream: ${status.streamAudio ? "on" : "off"}, show gist: ${status.showGist ? "on" : "off"}, dedupe: ${status.dedupe ? "on" : "off"}, words: ${status.gistTargetWords}, min chars: ${status.minGistInputChars}, gist model: ${status.gistProvider && status.gistModel ? `${status.gistProvider}/${status.gistModel}` : "current Pi model"}, tts queue: ${status.queue}, gist queue: ${status.gistQueue}, config: ${CONFIG_PATH}`,
+						`Anime monologue: ${status.enabled ? "on" : "off"}, ${status.gistUseLlm ? "LLM gist" : "local gist"}, api key: ${status.hasApiKey ? "yes" : "no"}, voice: ${status.voiceId ?? "missing"}, model: ${status.modelId}, language: ${status.languageCode ?? "auto"}, speed: ${status.voiceSpeed}, stream: ${status.streamAudio ? "on" : "off"}, reverb: ${status.reverb ? "on" : "off"}, show gist: ${status.showGist ? "on" : "off"}, dedupe: ${status.dedupe ? "on" : "off"}, words: ${status.gistTargetWords}, min chars: ${status.minGistInputChars}, gist model: ${status.gistProvider && status.gistModel ? `${status.gistProvider}/${status.gistModel}` : "current Pi model"}, tts queue: ${status.queue}, gist queue: ${status.gistQueue}, config: ${CONFIG_PATH}`,
 						"info",
 					);
 					break;
 				}
 				default:
-					ctx.ui.notify("Usage: /anime-monologue on|off|pause|onboard|speed <n>|voice [id]|tts-model [id]|words <n>|model <provider> <model>|language <code>|min <chars>|stream on|off|show-gist on|off|dedupe on|off|status|reload|test <text>|think-test <trace>", "error");
+					ctx.ui.notify("Usage: /anime-monologue on|off|pause|onboard|speed <n>|voice [id]|tts-model [id]|words <n>|model <provider> <model>|language <code>|min <chars>|stream on|off|show-gist on|off|dedupe on|off|reverb on|off|status|reload|test <text>|think-test <trace>", "error");
 			}
 		},
 	});

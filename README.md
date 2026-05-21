@@ -105,6 +105,7 @@ Guidance scale:
 | `/anime-monologue stream on\|off` | Toggle streaming audio |
 | `/anime-monologue show-gist on\|off` | Toggle gist notification |
 | `/anime-monologue dedupe on\|off` | Toggle duplicate suppression |
+| `/anime-monologue reverb on\|off` | Toggle cheesy sox reverb on TTS output |
 | `/anime-monologue reload` | Reload config from environment and `~/.pi/agent/anime-monologue.json` |
 | `/anime-monologue test <text>` | Speak a raw test line |
 | `/anime-monologue think-test <trace>` | Run fake trace through gist pipeline |
@@ -115,6 +116,7 @@ Guidance scale:
 | --- | --- |
 | `Ctrl+Alt+M` | Stop playback and clear narration queue |
 | `Ctrl+Alt+N` | Toggle narration on/off |
+| `Ctrl+Alt+R` | Toggle cheesy reverb on/off |
 
 ## Configuration
 
@@ -149,6 +151,7 @@ Environment variables override matching config-file values.
 | `ANIME_MONOLOGUE_STREAM_AUDIO` | `1` | Stream direct to player when available |
 | `ANIME_MONOLOGUE_SHOW_GIST` | `1` | Show spoken gist as Pi notification |
 | `ANIME_MONOLOGUE_DEDUPE` | `1` | Skip duplicate traces/gists |
+| `ANIME_MONOLOGUE_REVERB` | `0` | Enable cheesy sox reverb post-processing |
 | `ANIME_MONOLOGUE_PLAYER` | auto | Override player command |
 
 ## Package structure
@@ -171,3 +174,4 @@ pi-anime-monologue/
 - If thinking blocks show only `Thinking...`, Pi's built-in thinking display is collapsed; press `Ctrl+T` in Pi to toggle hidden thinking blocks.
 - TTS/playback runs in a background queue so it should not block Pi streaming.
 - Gist mode asks the configured/current Pi model for a brief 2–3 beat summary with an uncertain-whisper → breath/pivot → determined-landing arc, and explicitly tells it not to reveal step-by-step reasoning or add catchphrases/new facts.
+- **Reverb** requires [sox](https://sox.sourceforge.net/) (`brew install sox` on macOS, `apt install sox` on Linux). When sox is missing, reverb silently falls back to dry audio.
